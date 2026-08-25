@@ -53,6 +53,55 @@ def calc_bar_percent(img_bgr, bar_type='hp'):
     return max(0.0, min(100.0, (width / total) * 100))
 
 
+def save_bar_debug(img_bgr, bar_type, pct, log=None):
+    """保存血条/蓝条分析截图，便于排查识别问题（模块级，供诊断脚本复用）。
+
+    输出两张图到项目根目录：
+      - debug_<bar>.png       : 原始区域截图
+      - debug_<bar>_mask.png  : 叠加识别到的条像素（高亮）+ 左右边界线 + 百分比
+
+    Args:
+        img_bgr: 血条区域截图（BGR）
+        bar_type: 'hp' 或 'mp'
+        pct: 已计算出的百分比（画在图上）
+        log: 日志器（缺省使用 "GameBot"）；存图失败不应影响主循环，仅告警
+    """
+    logger = log or logging.getLogger("GameBot")
+    try:
+        cv2.imwrite(project_path(f"debug_{bar_type}.png"), img_bgr)
+
+        hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+        if bar_type == 'hp':
+            mask1 = cv2.inRange(hsv, config.HP_COLOR_LOWER,
+                                config.HP_COLOR_UPPER)
+            mask2 = cv2.inRange(hsv, config.HP_COLOR_LOWER2,
+                                config.HP_COLOR_UPPER2)
+            mask = cv2.bitwise_or(mask1, mask2)
+            color = (0, 0, 255)  # 红：HP
+        else:
+            mask = cv2.inRange(hsv, config.MP_COLOR_LOWER,
+                               config.MP_COLOR_UPPER)
+            color = (255, 0, 0)  # 蓝：MP
+
+        overlay = img_bgr.copy()
+        overlay[mask > 0] = color
+        col_counts = np.count_nonzero(mask, axis=0)
+        total = len(col_counts)
+        if total > 0:
+            nonzero = np.nonzero(col_counts > mask.shape[0] * 0.3)[0]
+            if len(nonzero) > 0:
+                left_x, right_x = int(nonzero[0]), int(nonzero[-1])
+                cv2.line(overlay, (left_x, 0),
+                         (left_x, overlay.shape[0]), (0, 255, 0), 1)
+                cv2.line(overlay, (right_x, 0),
+                         (right_x, overlay.shape[0]), (0, 255, 0), 1)
+        cv2.putText(overlay, f"{bar_type.upper()}: {pct:.1f}%", (4, 14),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+        cv2.imwrite(project_path(f"debug_{bar_type}_mask.png"), overlay)
+    except Exception as e:  # 调试存图失败不应影响主循环
+        logger.warning(f"保存 {bar_type} 调试截图失败: {e}")
+
+
 class HPMPMonitor:
     """HP/MP 监控：血条识别 + 补药。
 
@@ -119,47 +168,6 @@ class HPMPMonitor:
         """计算血条百分比（委托 calc_bar_percent 纯函数）。"""
         return calc_bar_percent(img_bgr, bar_type)
 
-    def _debug_save_bar(self, img_bgr, bar_type, pct):
-        """保存血条/蓝条分析截图，便于排查识别问题。
-
-        输出两张图到项目根目录：
-          - debug_<bar>.png       : 原始区域截图
-          - debug_<bar>_mask.png  : 叠加识别到的条像素（高亮）+ 左右边界线 + 百分比
-        """
-        try:
-            cv2.imwrite(project_path(f"debug_{bar_type}.png"), img_bgr)
-
-            hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
-            if bar_type == 'hp':
-                mask1 = cv2.inRange(hsv, config.HP_COLOR_LOWER,
-                                    config.HP_COLOR_UPPER)
-                mask2 = cv2.inRange(hsv, config.HP_COLOR_LOWER2,
-                                    config.HP_COLOR_UPPER2)
-                mask = cv2.bitwise_or(mask1, mask2)
-                color = (0, 0, 255)  # 红：HP
-            else:
-                mask = cv2.inRange(hsv, config.MP_COLOR_LOWER,
-                                   config.MP_COLOR_UPPER)
-                color = (255, 0, 0)  # 蓝：MP
-
-            overlay = img_bgr.copy()
-            overlay[mask > 0] = color
-            col_counts = np.count_nonzero(mask, axis=0)
-            total = len(col_counts)
-            if total > 0:
-                nonzero = np.nonzero(col_counts > mask.shape[0] * 0.3)[0]
-                if len(nonzero) > 0:
-                    left_x, right_x = int(nonzero[0]), int(nonzero[-1])
-                    cv2.line(overlay, (left_x, 0),
-                             (left_x, overlay.shape[0]), (0, 255, 0), 1)
-                    cv2.line(overlay, (right_x, 0),
-                             (right_x, overlay.shape[0]), (0, 255, 0), 1)
-            cv2.putText(overlay, f"{bar_type.upper()}: {pct:.1f}%", (4, 14),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
-            cv2.imwrite(project_path(f"debug_{bar_type}_mask.png"), overlay)
-        except Exception as e:  # 调试存图失败不应影响主循环
-            self.log.warning(f"保存 {bar_type} 调试截图失败: {e}")
-
     # ------------------------------------------------------------------ #
     #  补药决策
     # ------------------------------------------------------------------ #
@@ -172,8 +180,8 @@ class HPMPMonitor:
         self.mp_pct = self._calc_bar_percent(mp_img, 'mp')
         # 保存 HP/MP 分析截图（开关控制，用于排查识别问题）
         if config.SAVE_HP_MP_DEBUG:
-            self._debug_save_bar(hp_img, 'hp', self.hp_pct)
-            self._debug_save_bar(mp_img, 'mp', self.mp_pct)
+            save_bar_debug(hp_img, 'hp', self.hp_pct, log=self.log)
+            save_bar_debug(mp_img, 'mp', self.mp_pct, log=self.log)
         now = time.time()
 
         if 0 < self.hp_pct <= config.HP_THRESHOLD:

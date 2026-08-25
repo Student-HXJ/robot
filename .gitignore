@@ -18,4 +18,5 @@ __pycache__/
 detect_live.png
 debug_hp*.png
 debug_mp*.png
+debug_bars_overview.png
 calibration_detect.png
