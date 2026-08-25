@@ -1,0 +1,21 @@
+# Python 虚拟环境
+robot/
+
+# PyInstaller 构建产物
+build/
+dist/
+*.spec
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Claude Code 本地设置
+.claude/
+
+# 运行时调试输出图片
+detect_live.png
+debug_hp*.png
+debug_mp*.png
+calibration_detect.png
