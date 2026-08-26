@@ -18,12 +18,12 @@ The code is modular: every responsibility is its own class in its own file under
 | ---- | ------- |
 | `game_bot.py` | Main bot entry (`GameBot`): assembles detection + key simulation + HP/MP monitoring + pet feeding, drives the decision loop. F9 start/stop, F10 HP/MP+pet, F8 quit. |
 | `monster_detect.py` | Standalone detection CLI entry → `core/monster_detector.py::main()`. F9 toggles detection, F8 quits (reuses the functional control keys). |
-| `calibrate_hpmp.py` | Utility to interactively pick the HP/MP bar screen regions (writes results to paste into `config.toml` `[hpmp]`). |
+| `calibrate_hpmp.py` | Utility to interactively pick the detect/HP/MP screen regions (switches the game window to the front, grabs the fullscreen, drag-selects regions), save verification PNGs (`debug_detect.png` / `debug_hp_mask.png` / `debug_mp_mask.png` / `debug_regions_overview.png`) to judge recognition correctness, and write the coordinates back into `config.toml` (`[detect] detect_region`, `[hpmp] hp_bar_region`/`mp_bar_region`). |
 | `config.py` | **Config loader** — loads all tunable parameters from `config.toml` (TOML, Chinese comments) and exposes them as module attributes (`config.X`); auto-generates `config.toml` from the bundled `config.default.toml` when missing; handles exe-packaged paths (`BASE_DIR`, `resource_dir()`). |
-| `config.toml` | **User-editable config file** (the file to tune). Sections: `[path] [detect] [match] [monster_filter] [attack] [control_keys] [action_keys] [operation] [hpmp] [movement]`. Must sit next to the exe/project root. |
+| `config.toml` | **User-editable config file** (the file to tune). Sections: `[path] [detect] [match] [monster_filter] [attack] [control_keys] [action_keys] [operation] [hpmp] [window] [movement]`. Must sit next to the exe/project root. |
 | `config.default.toml` | Built-in default config template (bundled into the exe) — copied to `config.toml` on first run. |
 | `core/admin.py` | `ensure_admin()` — UIPI admin elevation. |
-| `core/win_window.py` | Win32 窗口工具：`find_game_window` / `find_game_window_hwnd` / `bring_to_front` / `activate_game_window`，供 auto_calibrate 与 screencap 共用。 |
+| `core/win_window.py` | Win32 窗口工具：`find_game_window` / `find_game_window_hwnd` / `bring_to_front` / `activate_game_window`，供 calibrate_hpmp 与 screencap 共用。 |
 | `core/utils.py` | `jitter()`, `setup_logging()`, `project_path()`. |
 | `core/screencap.py` | `ScreenCapture` — mss wrapper (region grab, idempotent `close()`); 每次抓图前先把游戏窗口切到前台（全屏时避免抓到桌面/被遮挡窗口，句柄缓存）。 |
 | `core/key_control.py` | `KeyControl` — pydirectinput wrapper; sole owner of the physical held-direction key `held_move_key`. |
@@ -34,7 +34,6 @@ The code is modular: every responsibility is its own class in its own file under
 | `core/monster_tracker.py` | `MonsterTracker` — approach / idle wander / stuck-reverse state machine. |
 | `core/hpmp_monitor.py` | `HPMPMonitor` — HP/MP bar recognition + potion keys, own thread. Also exports pure `calc_bar_percent()`. |
 | `core/pet_feeder.py` | `PetFeeder` — pet feeding on a timer, own thread. |
-| `core/auto_calibrate.py` | `auto_calibrate()` — startup auto-calibration of the monster `detect_region`: find the game window via Win32, re-derive the region from current window geometry. `calibrate_hpmp()` — re-derives `hp_bar_region`/`mp_bar_region` (linear transform as a Y hint, then locates the actual bars on screen by saturated-pixel + hue, since windowed→fullscreen HUD layout doesn't scale linearly) and verifies the bars when F10 starts HP/MP + pet feeding. `auto_calibrate()` called by `game_bot.py` and `core/monster_detector.py::main()`; `calibrate_hpmp()` called by `game_bot.py`'s F10 toggle. |
 
 ## Commands
 
@@ -47,11 +46,8 @@ python game_bot.py --monster all        # all categories under monster/
 python monster_detect.py --monster zhu
 python monster_detect.py --calibrate     # save calibration_detect.png with boxes drawn
 
-# Calibrate HP/MP bar regions (prints the values to paste into config.toml [hpmp])
+# Calibrate detect/HP/MP regions + save verification PNGs (writes the values into config.toml)
 python calibrate_hpmp.py
-
-# Diagnose HP/MP bar recognition (activates game window, auto-calibrates regions, saves debug PNGs)
-python test_hpmp.py
 
 # Package into a single exe (uses robot/ venv, install PyInstaller first)
 robot/Scripts/python.exe -m pip install pyinstaller
@@ -66,7 +62,7 @@ If no `--monster` is given, the program shows an interactive category menu at st
 ## Architecture
 
 ### Parameters (`config.toml` via `config.py`)
-All tunable values are centralized in **`config.toml`** (Chinese comments): screenshot/detect regions, template-match thresholds & scales, attack-distance constants, key mappings, operation delays/jitter, stuck-detection, HP/MP bar regions and HSV colors, pet-feeding interval. `config.py` parses it with stdlib `tomllib` and exposes every value as a module attribute (`config.X`), so modules keep importing `config` unchanged. Types are converted on load: regions → 4-tuples, colors → `np.uint8` arrays, `key_toggle_*` strings → `pynput` `Key` objects; `ALL_KEYS` / `SPACE_KEYS` are derived. **`BASE_DIR` is the project root — every path (template dirs, output PNGs) is resolved against it, so modules can safely live in `core/`.** Don't reintroduce `os.path.dirname(os.path.abspath(__file__))` in `core/` files for project paths; use `config.BASE_DIR` or `core/utils.project_path()`. Template dirs use `config.resource_dir(name)` (exe-side override → bundled `_MEIPASS` fallback). **`detect_region` / `hp_bar_region` / `mp_bar_region` are absolute screen coordinates calibrated against `[auto_calibrate] ref_window`.** At startup `core/auto_calibrate.py` finds the game window and re-derives `detect_region` (monster detection) from the current window geometry (translation exact, resize approximated by scale). `hp_bar_region`/`mp_bar_region` are re-derived when F10 starts HP/MP + pet feeding (`calibrate_hpmp()`), so the bar coordinates are set right before they're actually used. Moving/resizing the game window needs no manual config edit. If the game's internal layout changes (resolution/UI), recalibrate with `calibrate_hpmp.py` and update `ref_window`. `[auto_calibrate]` controls the feature: `enabled`, `game_window_keyword` (substring to find the window), `ref_window`. Set `save_hp_mp_debug = true` in `[hpmp]` to dump `debug_hp*.png` / `debug_mp*.png` for troubleshooting.
+All tunable values are centralized in **`config.toml`** (Chinese comments): screenshot/detect regions, template-match thresholds & scales, attack-distance constants, key mappings, operation delays/jitter, stuck-detection, HP/MP bar regions and HSV colors, pet-feeding interval. `config.py` parses it with stdlib `tomllib` and exposes every value as a module attribute (`config.X`), so modules keep importing `config` unchanged. Types are converted on load: regions → 4-tuples, colors → `np.uint8` arrays, `key_toggle_*` strings → `pynput` `Key` objects; `ALL_KEYS` / `SPACE_KEYS` are derived. **`BASE_DIR` is the project root — every path (template dirs, output PNGs) is resolved against it, so modules can safely live in `core/`.** Don't reintroduce `os.path.dirname(os.path.abspath(__file__))` in `core/` files for project paths; use `config.BASE_DIR` or `core/utils.project_path()`. Template dirs use `config.resource_dir(name)` (exe-side override → bundled `_MEIPASS` fallback). **`detect_region` / `hp_bar_region` / `mp_bar_region` are absolute screen coordinates set in `config.toml` via `calibrate_hpmp.py`.** There is no runtime auto-calibration — the bot reads these coordinates directly from `config.toml`. To change them, run `calibrate_hpmp.py`, box-select the regions, and paste the printed values into `[detect]` / `[hpmp]`. The `[window] game_window_keyword` is used by `core/screencap.py` to bring the game window to the foreground before each capture. Set `save_hp_mp_debug = true` in `[hpmp]` to dump `debug_hp*.png` / `debug_mp*.png` for troubleshooting.
 
 ### Template-based detection
 - Templates live in folders, not code: `monster/<category>/` holds monster crops, `player/` holds player crops. Adding a monster type = create a subfolder and drop PNGs in. `TemplateLoader` pre-scales every template by `TEMPLATE_SCALES` and horizontally mirrors it (`with_mirror=True`), so both facing directions are covered at match time.
@@ -81,10 +77,10 @@ All tunable values are centralized in **`config.toml`** (Chinese comments): scre
 - Key bindings are in `config.toml` (`[control_keys]` / `[action_keys]`): attack `x`, pickup `z`, HP potion `9`, MP potion `0`, feed pet `8`, left/right direction keys (no jump key). `monster_detect.py` reuses `[control_keys]` (F9 toggle, F8 quit). Everything user-facing is a key in `config.toml` with a Chinese comment.
 
 ### HP/MP monitoring and pet feeding are decoupled from the bot
-- F10 toggles `HPMPMonitor` + `PetFeeder` threads (both together), independent of F9's start/stop. Enabling F10 first runs `calibrate_hpmp()` (`core/auto_calibrate.py`) to re-derive the HP/MP bar regions from the current window geometry and verify the bars, then starts the threads. `HPMPMonitor` samples `HP_BAR_REGION` / `MP_BAR_REGION` (absolute screen coords), computes bar percent via HSV color thresholds, and presses 9/0 when below `HP_THRESHOLD` (50%) / `MP_THRESHOLD` (50%), respecting `POTION_COOLDOWN`. Set `save_hp_mp_debug = true` in `config.toml` (`[hpmp]`) to dump `debug_hp*.png` / `debug_mp*.png` for troubleshooting.
+- F10 toggles `HPMPMonitor` + `PetFeeder` threads (both together), independent of F9's start/stop. `HPMPMonitor` samples `HP_BAR_REGION` / `MP_BAR_REGION` (absolute screen coords), computes bar percent via HSV color thresholds, and presses 9/0 when below `HP_THRESHOLD` (50%) / `MP_THRESHOLD` (50%), respecting `POTION_COOLDOWN`. Set `save_hp_mp_debug = true` in `config.toml` (`[hpmp]`) to dump `debug_hp*.png` / `debug_mp*.png` for troubleshooting.
 
 ### Admin elevation
-`game_bot.py` and `core/monster_detector.py::main()` call `ensure_admin()` at startup: if not elevated, they relaunch themselves via `ShellExecuteW("runas", ...)` and exit. This is required because the game runs as administrator and UIPI drops simulated input from non-elevated processes — don't remove it.
+`game_bot.py`, `core/monster_detector.py::main()`, and `calibrate_hpmp.py` call `ensure_admin()` at startup: if not elevated, they relaunch themselves via `ShellExecuteW("runas", ...)` and exit. This is required because the game runs as administrator and UIPI drops simulated input from non-elevated processes — don't remove it.
 
 ### Dependency direction (acyclic)
 `config.py → core/{admin,utils,screencap,key_control,template_matcher,player_detector,attack_distance,monster_detector,monster_tracker,hpmp_monitor,pet_feeder} → game_bot.py`. Rules: `core/` modules must **not** import `game_bot.py`; `core/monster_tracker.py` must **not** import `core/monster_detector.py` (player coords are passed in as `cur`); `core/key_control.py` must **not** import `core/monster_tracker.py`. Logging: `MonsterDetector` keeps `print()` output (standalone tool); `GameBot` subsystems use `logging` via `utils.setup_logging()`.

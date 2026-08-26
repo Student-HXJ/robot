@@ -15,8 +15,4 @@ __pycache__/
 .claude/
 
 # 运行时调试输出图片
-detect_live.png
-debug_hp*.png
-debug_mp*.png
-debug_bars_overview.png
-calibration_detect.png
+*.png

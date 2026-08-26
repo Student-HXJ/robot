@@ -15,7 +15,7 @@ robot/
 ├── config.default.toml       # 内置默认配置模板（打包进 exe，首次运行生成 config.toml）
 ├── game_bot.py               # 主机器人入口（F9 启停 / F10 血蓝+喂宠 / F8 退出）
 ├── monster_detect.py         # 独立检测入口（F9 启停 / F8 退出，与功能控制键一致）
-├── calibrate_hpmp.py         # HP/MP 血条区域校准工具
+├── calibrate_hpmp.py         # 检测框/血条/蓝条区域校准 + 存图校验工具
 ├── build_exe.py              # 打包脚本（PyInstaller 生成 dist/game_bot.exe）
 ├── core/                     # 核心模块，每个职责一个类一个文件
 │   ├── admin.py              # 管理员提权
@@ -28,8 +28,7 @@ robot/
 │   ├── monster_detector.py   # MonsterDetector 怪物检测
 │   ├── monster_tracker.py    # MonsterTracker 怪物跟踪（靠近/卡住脱困）
 │   ├── hpmp_monitor.py       # HPMPMonitor 加血加蓝
-│   ├── pet_feeder.py         # PetFeeder 喂宠物
-│   └── auto_calibrate.py     # 启动自动校准（窗口移动/缩放后自动调区域坐标）
+│   └── pet_feeder.py         # PetFeeder 喂宠物
 ├── monster/                  # 怪物模板（按分类分子文件夹）
 └── player/                   # 玩家模板
 ```
@@ -50,7 +49,7 @@ python game_bot.py --monster all
 # 单独运行检测（观察识别效果，F9 启停，F8 退出）
 python monster_detect.py --monster zhu
 
-# 校准 HP/MP 血条区域（把输出坐标填入 config.toml 的 [hpmp] 节）
+# 校准检测框/血条/蓝条区域 + 存图校验（自动把坐标写入 config.toml 的 [detect] / [hpmp] 节）
 python calibrate_hpmp.py
 ```
 
@@ -85,15 +84,12 @@ python calibrate_hpmp.py
 > 若 `config.toml` 缺失，程序会从内置的 `config.default.toml` 自动生成一份，
 > 方便直接编辑调参。
 
-**区域坐标自动校准**：`[auto_calibrate]` 节控制该功能，用 Win32 找到游戏窗口，
-按 `ref_window`（参考窗口位置）与当前窗口的几何关系自动调整屏幕坐标。
-`detect_region` 在程序启动时校准（F9 追怪用）；`hp_bar_region` / `mp_bar_region`
-在按 F10 开启加血加蓝时校准并做血条颜色校验（坐标在真正开始监控时才确定）。
-游戏窗口移动/缩放后**无需手动改配置**。
-
-只有游戏**内部布局**变化（分辨率/UI 大变）时才需要手动校准：
-`python calibrate_hpmp.py`，把输出的坐标填回 `config.toml` 的 `[hpmp]` 节，
-并把游戏窗口当前位置填入 `[auto_calibrate]` 的 `ref_window`。
+**区域坐标校准**：检测框 / 血条 / 蓝条区域坐标都通过 `python calibrate_hpmp.py`
+手动框选确定：脚本会把游戏窗口切到前台、截全屏，让你依次框选检测区域、
+HP 血条、MP 蓝条，并生成 `debug_*_mask.png` 等校验图供核对。框选完成后
+脚本会自动把坐标写回 `config.toml` 的 `[detect]` / `[hpmp]` 节，重启机器人
+后生效。游戏窗口移动/换设备/改分辨率后需重新校准。`[window] game_window_keyword`
+仅用于抓图前把游戏窗口切到前台。
 
 ## 打包成 exe（跨 Windows 设备使用）
 

@@ -5,8 +5,8 @@ HP/MP 监控模块（加血加蓝）。
 运行在独立线程中，与机器人主循环解耦——停止机器人后仍可继续监控。
 
 血条区域（HP_BAR_REGION / MP_BAR_REGION）是机器/分辨率相关的：
-基础坐标用 calibrate_hpmp.py 校准后填入 config.py；按 F10 开启加血加蓝时
-auto_calibrate.calibrate_hpmp() 会按当前游戏窗口自动重算血条坐标。
+基础坐标用 calibrate_hpmp.py 校准后填入 config.toml，运行时直接读取该坐标，
+不再自动重算。
 """
 
 import logging

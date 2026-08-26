@@ -487,11 +487,6 @@ def main():
                         "如 zhu；传 all 表示全部；不传则启动时交互选择")
     args = parser.parse_args()
 
-    # 启动自动校准：检测游戏窗口当前位置，自动调整怪物检测区域
-    # （HP/MP 血条区域由 game_bot 在按 F10 开启加血加蓝时校准，本工具不含）
-    from core.auto_calibrate import auto_calibrate
-    auto_calibrate()
-
     # 启动时先选择要检测的怪物分类
     monster_dir = select_monster_category(args.monster)
     if monster_dir is None:

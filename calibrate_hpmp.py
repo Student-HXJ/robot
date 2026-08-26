@@ -1,26 +1,77 @@
-"""HP/MP 血条区域校准工具。
+"""HP/MP 血条 + 检测区域校准与存图校验工具。
 
 用法：
     python calibrate_hpmp.py
 
 运行后会：
-  1. 截取全屏并显示（matplotlib 窗口）
-  2. 让你依次用鼠标拖拽框选 HP 血条区域、MP 血条区域
-  3. 把区域截图保存为 debug_hp.png / debug_mp.png 供核对
-  4. 打印推荐的 HP_BAR_REGION / MP_BAR_REGION 坐标（left, top, width, height）
+  1. 以管理员权限运行（游戏窗口通常为管理员，否则截图会变黑）
+  2. 按 config.toml 的 game_window_keyword 把游戏窗口切到前台
+  3. 截取全屏并显示（matplotlib 窗口）
+  4. 让你依次用鼠标拖拽框选「检测区域」「HP 血条区域」「MP 血条区域」
+  5. 按框选结果存图供人工核对识别是否准确：
+       - debug_detect.png                 检测区域裁剪图
+       - debug_hp.png / debug_hp_mask.png HP 原图 / 识别掩膜叠加图
+       - debug_mp.png / debug_mp_mask.png MP 原图 / 识别掩膜叠加图
+       - debug_regions_overview.png       全屏总览（画出三个框，核对是否对准）
+  6. 把框选结果写回 config.toml 并打印确认
+     （[detect] detect_region 与 [hpmp] hp_bar_region / mp_bar_region）
 
 若没有 GUI 环境（如远程/无显示器），会自动改用全屏 + 鼠标坐标打印方式。
 """
 
-import os
+import re
 import sys
+import time
 import traceback
 
 import numpy as np
 import mss
 import cv2
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+import config
+from core.admin import ensure_admin
+from core.win_window import activate_game_window
+from core.hpmp_monitor import calc_bar_percent, save_bar_debug
+from core.utils import project_path
+
+# 需要框选的区域：(key, 中文标签)。
+# detect → [detect] detect_region；hp/mp → [hpmp] hp_bar_region / mp_bar_region。
+REGIONS = [
+    ("detect", "检测区域"),
+    ("hp", "HP 血条"),
+    ("mp", "MP 血条"),
+]
+
+# 每个 key 对应的 config.toml 变量名（用于打印推荐结果）
+OUTPUT_NAMES = {
+    "detect": "DETECT_REGION",
+    "hp": "HP_BAR_REGION",
+    "mp": "MP_BAR_REGION",
+}
+
+# 每个 key 的英文标签（matplotlib 窗口标题用；中文标题在部分环境渲染成乱码/方框）
+EN_LABELS = {
+    "detect": "detection region",
+    "hp": "HP bar",
+    "mp": "MP bar",
+}
+
+
+def switch_to_game():
+    """抓全屏前把游戏窗口切到前台（全屏时避免抓到桌面/被遮挡窗口）。
+
+    关键字取自 config.GAME_WINDOW_KEYWORD（与 screencap 一致）。
+    切换失败静默继续（仍会抓屏，只是可能抓到桌面）。
+    """
+    try:
+        keyword = config.GAME_WINDOW_KEYWORD
+        if activate_game_window(keyword):
+            print(f"[INFO] 已切换到游戏窗口（关键字={keyword}）")
+        else:
+            print(f"[WARN] 未找到游戏窗口（关键字={keyword}），可能抓到桌面")
+        time.sleep(0.5)  # 等窗口真正置前再抓屏
+    except Exception as e:
+        print(f"[WARN] 切换游戏窗口失败（{e}），继续抓屏")
 
 
 def grab_fullscreen():
@@ -32,14 +83,8 @@ def grab_fullscreen():
     return img  # BGR
 
 
-def save_debug(img, bar_type):
-    path = os.path.join(SCRIPT_DIR, f"debug_{bar_type}.png")
-    cv2.imwrite(path, img)
-    print(f"[INFO] 已保存 {path} ({img.shape[1]}x{img.shape[0]})")
-
-
 def try_gui_select(full_img):
-    """尝试用 matplotlib 交互框选；成功返回 (hp_region, mp_region)，失败返回 None。"""
+    """尝试用 matplotlib 交互框选；成功返回 {key: region}，失败返回 None。"""
     try:
         import matplotlib
         matplotlib.use("TkAgg")
@@ -50,13 +95,13 @@ def try_gui_select(full_img):
         return None
 
     regions = {}
-    order = [("hp", "HP"), ("mp", "MP")]
 
-    for key, label in order:
+    for key, label in REGIONS:
         fig, ax = plt.subplots(figsize=(12, 7))
         # BGR -> RGB 显示
         ax.imshow(cv2.cvtColor(full_img, cv2.COLOR_BGR2RGB))
-        ax.set_title(f"拖拽框选 {label} 血条区域，框好后关闭窗口（或按 Enter）")
+        ax.set_title(f"Drag to select the {EN_LABELS[key]} region, "
+                     f"then close the window (or press Enter)")
         rect = {}
 
         def on_select(eclick, erelease):
@@ -93,8 +138,6 @@ def try_gui_select(full_img):
             print(f"[WARN] {label} 区域太小，跳过")
             continue
         regions[key] = (left, top, w, h)
-        crop = full_img[top:top + h, left:left + w]
-        save_debug(crop, key)
 
     return regions
 
@@ -103,9 +146,9 @@ def manual_select(full_img):
     """无 GUI 时，让用户根据屏幕坐标手动输入。"""
     h, w = full_img.shape[:2]
     print(f"[INFO] 全屏尺寸: {w} x {h}")
-    print("请在游戏里把血条位置记下来，或直接输入屏幕坐标（左上角原点）。")
+    print("请在游戏里把区域位置记下来，或直接输入屏幕坐标（左上角原点）。")
     regions = {}
-    for key, label in [("hp", "HP"), ("mp", "MP")]:
+    for key, label in REGIONS:
         raw = input(f"输入 {label} 区域 (left top width height)，留空跳过: ").strip()
         if not raw:
             continue
@@ -119,21 +162,104 @@ def manual_select(full_img):
         ww = min(ww, w - left)
         hh = min(hh, h - top)
         regions[key] = (left, top, ww, hh)
-        crop = full_img[top:top + hh, left:left + ww]
-        save_debug(crop, key)
     return regions
 
 
+def verify_regions(full_img, regions):
+    """按框选结果存图校验识别是否准确（对应原 test_hpmp.py 的存图功能）。
+
+    - detect: 保存原始裁剪图 debug_detect.png
+    - hp/mp: 用 config.toml 的 HSV 颜色阈值计算百分比，保存原始图 +
+      识别掩膜叠加图（debug_hp.png / debug_hp_mask.png 等）
+    - 最后在全屏上画出三个框，保存 debug_regions_overview.png 供核对框是否对准
+    """
+    print()
+    print("[INFO] 正在按框选结果存图校验识别 ...")
+
+    colors = {"detect": (0, 255, 255), "hp": (0, 0, 255), "mp": (255, 0, 0)}
+    labels = {"detect": "DETECT", "hp": "HP", "mp": "MP"}
+
+    overview = full_img.copy()
+    for key, (left, top, w, h) in regions.items():
+        crop = full_img[top:top + h, left:left + w]
+        if key == "detect":
+            cv2.imwrite(project_path("debug_detect.png"), crop)
+            print(f"[INFO] 已保存 debug_detect.png（检测区域裁剪图）")
+        else:
+            pct = calc_bar_percent(crop, key)
+            save_bar_debug(crop, key, pct)
+            print(f"[INFO] {key.upper()} 识别 = {pct:.1f}%"
+                  f"（见 debug_{key}.png / debug_{key}_mask.png）")
+            if pct <= 0:
+                print(f"[WARN] {key.upper()} 未识别到血条颜色，框选可能没对准，"
+                      "请重新框选")
+        # 全屏总览上画框
+        cv2.rectangle(overview, (left, top), (left + w, top + h), colors[key], 2)
+        cv2.putText(overview, labels[key], (left + 3, max(10, top - 5)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, colors[key], 2)
+
+    cv2.imwrite(project_path("debug_regions_overview.png"), overview)
+    print("[INFO] 已保存 debug_regions_overview.png（全屏总览，核对框是否对准）")
+
+
+def write_to_config(regions):
+    """把框选结果写回 config.toml 的 [detect]/[hpmp] 节。
+
+    只替换对应 key 的值（detect_region / hp_bar_region / mp_bar_region），
+    保留文件里的中文注释与其他配置。找不到 key 或读写失败时打印警告并跳过，
+    不阻塞校准流程。
+
+    Returns:
+        list: 成功写入的 toml key 列表（如 ['detect_region', 'hp_bar_region']）
+    """
+    path = config.CONFIG_PATH
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            text = f.read()
+    except OSError as e:
+        print(f"[WARN] 读取 {path} 失败（{e}），未写入")
+        return []
+
+    updated = []
+    for key, (left, top, w, h) in regions.items():
+        toml_key = OUTPUT_NAMES[key].lower()  # DETECT_REGION -> detect_region
+        # 只匹配 "key = [旧值]"，行尾的中文注释保留不动
+        pattern = re.compile(rf"^(\s*{toml_key}\s*=\s*)\[[^\]]*\]", re.MULTILINE)
+
+        def repl(m, _left=left, _top=top, _w=w, _h=h):
+            return f"{m.group(1)}[{_left}, {_top}, {_w}, {_h}]"
+
+        new_text, n = pattern.subn(repl, text)
+        if n == 0:
+            print(f"[WARN] 未在 {path} 中找到 {toml_key}，未写入")
+            continue
+        text = new_text
+        updated.append(toml_key)
+
+    if updated:
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+        except OSError as e:
+            print(f"[WARN] 写入 {path} 失败（{e}）")
+            return []
+        print(f"[INFO] 已把坐标写入 {path}: {', '.join(updated)}")
+    return updated
+
+
 def main():
+    ensure_admin()
     print("=" * 60)
-    print("  HP/MP 血条校准工具")
+    print("  HP/MP 血条 + 检测区域校准与存图校验工具")
     print("=" * 60)
     print("[INFO] 请在游戏窗口处于正常显示状态时运行本工具")
 
+    switch_to_game()
+
     full = grab_fullscreen()
-    full_path = os.path.join(SCRIPT_DIR, "debug_fullscreen.png")
+    full_path = project_path("debug_fullscreen.png")
     cv2.imwrite(full_path, full)
-    print(f"[INFO] 全屏已保存: {full_path}（可打开查看血条位置）")
+    print(f"[INFO] 全屏已保存: {full_path}（可打开查看区域位置）")
 
     regions = try_gui_select(full)
     if regions is None:
@@ -143,15 +269,23 @@ def main():
         print("[WARN] 未获取任何区域")
         return
 
+    verify_regions(full, regions)
+    write_to_config(regions)
+
     print()
     print("=" * 60)
-    print("  校准结果（复制到 config.toml 的 [hpmp] 节 hp_bar_region / mp_bar_region）")
-    print("  同时把当前游戏窗口位置填入 [auto_calibrate] 节的 ref_window = [left, top, width, height]")
+    print("  校准结果（已写入 config.toml）")
+    print("  [detect] detect_region  →  检测区域")
+    print("  [hpmp] hp_bar_region / mp_bar_region  →  血条/蓝条区域")
     print("=" * 60)
     for key, (left, top, w, h) in regions.items():
-        print(f"  {key.upper()}_BAR_REGION = ({left}, {top}, {w}, {h})")
+        print(f"  {OUTPUT_NAMES[key]} = ({left}, {top}, {w}, {h})")
     print("=" * 60)
-    print("已生成 debug_hp.png / debug_mp.png，请核对其中的血条是否完整、颜色正常。")
+    print("  请打开以下截图判定识别是否正确：")
+    print("    debug_hp_mask.png / debug_mp_mask.png  <- 红/蓝高亮即识别到的血条")
+    print("    debug_regions_overview.png             <- 全屏总览（三个框）")
+    print("  坐标已写入 config.toml，重启机器人即可生效。")
+    print("  若百分比不合理或框没对准，请重新运行并重新框选。")
 
 
 if __name__ == "__main__":

@@ -16,8 +16,7 @@ MonsterTracker / HPMPMonitor / PetFeeder，由单一决策循环驱动：
    位置单侧不超过 move_limit_pixels 像素，越界立即反向防跑出挂机区域
 
 按键说明：
-  F9 启动/停止机器人；F10 开启/关闭 HP/MP 监控 + 喂食宠物（开启时自动校准
-  血条区域）；F8 退出。
+  F9 启动/停止机器人；F10 开启/关闭 HP/MP 监控 + 喂食宠物；F8 退出。
   攻击 X | 捡东西 Z | 补HP 9 | 补MP 0 | 喂宠物 8。
 """
 
@@ -31,7 +30,6 @@ from pynput.keyboard import Listener
 import config
 from core import utils
 from core.admin import ensure_admin
-from core.auto_calibrate import calibrate_hpmp
 from core.hpmp_monitor import HPMPMonitor
 from core.key_control import KeyControl
 from core.monster_detector import MonsterDetector
@@ -127,19 +125,11 @@ class GameBot:
     def toggle_hp_mp(self):
         """切换 HP/MP 监控 + 喂食宠物开关（F10 统一控制）。
 
-        开启时先按当前游戏窗口重新校准 HP/MP 血条区域坐标并做血条校验
-        （calibrate_hpmp），确保检测框坐标在真正开始加血加蓝时才确定；
-        校准失败不阻塞开启，沿用现有坐标。
+        血条/蓝条/检测框坐标统一由 calibrate_hpmp.py 校准并写入 config.toml，
+        此处不再做运行时自动校准，直接按配置坐标启动监控线程。
         """
         self.hp_mp_enabled = not self.hp_mp_enabled
         if self.hp_mp_enabled:
-            try:
-                _, _, hp_pct, mp_pct = calibrate_hpmp()
-                self.log.info("F10 开启：HP/MP 血条区域已自动校准 "
-                              f"（HP={hp_pct:.1f}% MP={mp_pct:.1f}%）")
-            except Exception as e:
-                self.log.warning(f"F10 开启：HP/MP 血条区域自动校准失败（{e}），"
-                                 "沿用现有坐标")
             self.hpmp.start()
             self.feeder.start()
         else:
@@ -325,11 +315,6 @@ def main():
                         "传 all 表示全部；不传则在程序启动时交互选择")
     args = parser.parse_args()
 
-    # 启动自动校准：检测游戏窗口当前位置，自动调整怪物检测区域；
-    # HP/MP 血条区域改在按 F10 开启加血加蓝时校准（calibrate_hpmp）
-    from core.auto_calibrate import auto_calibrate
-    auto_calibrate()
-
     # 程序启动时一次性确定怪物分类（命令行指定或交互选择），之后不再询问
     monster_dir = select_monster_category(args.monster)
     if monster_dir is None:
@@ -353,8 +338,7 @@ def main():
     print("  智能游戏机器人已启动")
     print("=" * 60)
     print("  - 按 [F9] 启动/停止机器人")
-    print("  - 按 [F10] 开启/关闭 HP/MP 监控 + 喂食宠物（独立开关；"
-          "开启时自动校准血条区域）")
+    print("  - 按 [F10] 开启/关闭 HP/MP 监控 + 喂食宠物（独立开关）")
     print("  - 按 [F8] 退出程序")
     print(f"  - 攻击: {config.KEY_ATTACK.upper()} | 捡东西: {config.KEY_PICKUP.upper()}")
     print(f"  - 补HP: {config.KEY_HP_POTION} "

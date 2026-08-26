@@ -1,7 +1,7 @@
 """Win32 窗口工具：按标题关键字查找游戏窗口并切到前台。
 
 抓图前需要把全屏游戏切到前台，避免抓到桌面/被遮挡窗口。窗口查找与激活
-逻辑集中在此，供自动校准（auto_calibrate）与截屏（screencap）共用，
+逻辑集中在此，供校准工具（calibrate_hpmp）与截屏（screencap）共用，
 避免多处重复 EnumWindows。
 
 所有函数 Windows-only（ctypes.windll）。
@@ -9,6 +9,25 @@
 
 import ctypes
 from ctypes import wintypes
+
+
+def _set_dpi_aware():
+    """让进程 DPI 感知，使 GetWindowRect 返回物理像素坐标。
+
+    否则在系统显示缩放（如 150%）下，GetWindowRect 返回「逻辑坐标」，会与
+    mss 截屏的「物理坐标」错位，导致自动校准按错误比例缩放血条/检测区域。
+    （实测 150% 缩放下 GetWindowRect 报 1707x1067，mss 报 2560x1600。）
+    """
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
+
+_set_dpi_aware()
 
 
 def _enumerate(keyword):
@@ -53,7 +72,7 @@ def _enumerate(keyword):
 def find_game_window(keyword):
     """按标题关键字查找游戏窗口，返回 (left, top, width, height) 或 None。
 
-    用 GetWindowRect 取窗口外框坐标（与 config.ref_window 的标定口径一致）。
+    用 GetWindowRect 取窗口外框坐标（屏幕绝对像素坐标，与 mss 截屏口径一致）。
     有多个匹配时取面积最大的窗口，避免误匹配到浏览器标签等。
     """
     _, rect = _enumerate(keyword)

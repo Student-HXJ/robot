@@ -172,10 +172,8 @@ _SCHEMA = [
     ("hpmp", "hp_mp_check_interval", "HP_MP_CHECK_INTERVAL", None),
     ("hpmp", "save_hp_mp_debug", "SAVE_HP_MP_DEBUG", None),
 
-    # ---- [auto_calibrate] 启动自动校准 ----
-    ("auto_calibrate", "enabled", "AUTO_CALIBRATE_ENABLED", None),
-    ("auto_calibrate", "game_window_keyword", "GAME_WINDOW_KEYWORD", None),
-    ("auto_calibrate", "ref_window", "CALIB_REF_WINDOW", _to_region),
+    # ---- [window] 游戏窗口识别 ----
+    ("window", "game_window_keyword", "GAME_WINDOW_KEYWORD", None),
 
     # ---- [movement] 水平移动范围限制（仅对指定怪物分类生效） ----
     ("movement", "move_limit_enabled_categories",
