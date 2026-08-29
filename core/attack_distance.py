@@ -13,7 +13,7 @@ import config
 
 
 def distance(cx, pcx):
-    """玩家与怪物的 X 距离（右偏 ATTACK_CENTER_OFFSET）。
+    """玩家与怪物的 X 距离（纯中心点水平距离，不含偏移）。
 
     用于怪物由近到远排序。
 
@@ -21,7 +21,7 @@ def distance(cx, pcx):
         cx: 怪物中心 X
         pcx: 玩家中心 X
     """
-    return abs(cx - pcx - config.ATTACK_CENTER_OFFSET)
+    return abs(cx - pcx)
 
 
 def in_range(cx, pcx):

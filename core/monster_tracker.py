@@ -2,9 +2,9 @@
 怪物跟踪模块。
 
 负责"持续按住方向键"的移动决策：
-- 玩家进入检测框左/右区 → 立即回中（keep_centered，最高优先级）
+- 玩家框触达检测框最左/最右禁止区域边界 → 立即反向（keep_centered，最高优先级）
 - 怪物在攻击范围外 → 按住方向键朝怪物靠近（hold_toward）
-- 无怪物时 → 按住方向键随机左右移动防掉线（idle_wander）
+- 无怪物时 → 沿持久方向移动（idle_wander），触达禁止区域才反向（替代随机移动）
 - 移动被阻挡 → 卡住检测，立即反向脱困（check_stuck_and_reverse）
 
 物理按键由 KeyControl 执行，按住状态（held_move_key）由 KeyControl 持有，
@@ -12,15 +12,13 @@
 """
 
 import logging
-import random
 import time
 
 import config
-from core.utils import jitter
 
 
 class MonsterTracker:
-    """怪物跟踪器：靠近/随机移动/卡住反向脱困。
+    """怪物跟踪器：追怪靠近/持久方向巡逻/卡住反向脱困。
 
     Attributes:
         卡住检测状态（仅本类维护，物理按键状态在 KeyControl）：
@@ -28,11 +26,9 @@ class MonsterTracker:
         - _stuck_base_dir     基准点对应的按住方向；方向一变更即重置基准点
         - _move_stuck_check_at 下次卡住检查时间点
         - _stuck_reverse_until 反向脱困后禁止他处逻辑覆盖方向的截止时间
-        - _move_switch_at      空闲随机移动切换方向的时间点
-        - _range_anchor_x     水平移动范围限制的基准 X（启动时玩家 X，仅限
-                              指定分类如 lvmogu 时使用）
         - _centering_dir      玩家居中校正当前回中方向（None=未在校正），
                               仅用于回中日志降频（换向/进入时各记一次）
+        - _phase_dir          五区巡逻持久方向（左/右），触达禁止区域时反向更新
     """
 
     def __init__(self, keys, log=None):
@@ -44,8 +40,6 @@ class MonsterTracker:
         self._keys = keys
         self.log = log or logging.getLogger("GameBot")
 
-        # 空闲随机移动切换方向的时间点
-        self._move_switch_at = 0.0
         # 卡住检测：上次移动时的玩家位置与下次检查时间点
         self._last_move_pos = None
         self._move_stuck_check_at = 0.0
@@ -53,10 +47,10 @@ class MonsterTracker:
         self._stuck_base_dir = None
         # 反向脱困后禁止他处逻辑覆盖方向的截止时间
         self._stuck_reverse_until = 0.0
-        # 水平移动范围限制基准 X（首次调用 keep_in_range 时取玩家 X）
-        self._range_anchor_x = None
         # 玩家居中校正当前回中方向（None 表示未在校正），用于回中日志降频
         self._centering_dir = None
+        # 五区巡逻持久方向（左/右）：无怪物时沿此方向移动，触达禁止区域才反向
+        self._phase_dir = None
 
     # ------------------------------------------------------------------ #
     #  移动决策
@@ -85,7 +79,13 @@ class MonsterTracker:
             self._keys.hold_dir(move_dir)
 
     def idle_wander(self, now, cur, frame_count):
-        """无怪物时：按住方向键持续随机左右移动（不松开），防掉线。
+        """无怪物时：沿持久方向（_phase_dir）移动，不再随机换向，防掉线。
+
+        持久方向初始向右，之后在触达禁止区域（keep_centered）、卡住反向
+        （check_stuck_and_reverse）或追怪退出（保持退出时朝向）时被更新，
+        实现"一直往一个方向走，直到触达禁止区域才掉头"的巡逻寻路（替代原先
+        的随机移动）。刚从追怪退出时若仍按住方向键，则保持该朝向作为新的持久
+        方向，不立即切回旧持久方向（对齐"保持退出时的朝向"需求）。
 
         Args:
             now: 当前时间戳
@@ -95,66 +95,79 @@ class MonsterTracker:
         # 卡住检测：移动被阻挡立即向相反方向移动（也会自动初始化基准点）
         self.check_stuck_and_reverse(now, cur)
 
-        # 初次进入或随机切换周期到，随机换方向（按住不松开）
-        if (self._keys.held_move_key is None
-                or now >= self._move_switch_at):
-            new_dir = random.choice([config.KEY_LEFT, config.KEY_RIGHT])
-            self._keys.hold_dir(new_dir)
-            self._move_switch_at = now + jitter(config.IDLE_SWITCH_INTERVAL,
-                                                config.IDLE_SWITCH_JITTER)
-            self._last_move_pos = cur
-            self._stuck_base_dir = new_dir
-            self._move_stuck_check_at = (now +
-                                         config.MOVE_STUCK_CHECK_INTERVAL)
-            if frame_count % config.LOG_FRAME_INTERVAL == 0:
-                self.log.info(
-                    f"空闲随机移动（按住"
-                    f"{'右' if new_dir == config.KEY_RIGHT else '左'}，"
-                    f"下次切换约 {self._move_switch_at - now:.1f}s 后）")
+        # 首次进入确定持久方向（默认向右）；之后保持，直到禁区/卡住反向更新
+        if self._phase_dir is None:
+            self._phase_dir = config.KEY_RIGHT
 
-    def keep_centered(self, now, px, left_boundary, right_boundary):
-        """玩家居中校正：玩家 X 进入检测框最左/最右区域时，立即按住朝中间区域
-        的方向键回中，返回 True 表示已接管移动方向。
+        # 反向脱困保护期内不覆盖方向，让反向移动先跑完脱困
+        if now < self._stuck_reverse_until:
+            return
 
-        检测区域按宽度分为若干块（默认等价于均分 5 块）：玩家在中间区域
-        （left_boundary 与 right_boundary 之间）时不做任何调整；进入最左区域
-        （px < left_boundary）按住右方向键，进入最右区域
-        （px > right_boundary）按住左方向键，尽量让玩家保持在中间区域活动。
+        held = self._keys.held_move_key
+        if held != self._phase_dir:
+            if held is not None:
+                # 刚从追怪退出：保持退出时的朝向（当前按住方向）作为新的持久
+                # 方向继续巡逻，不立即切回旧持久方向
+                self._phase_dir = held
+                if frame_count % config.LOG_FRAME_INTERVAL == 0:
+                    self.log.info(
+                        f"追怪退出，保持朝向"
+                        f"{'右' if held == config.KEY_RIGHT else '左'}巡逻")
+            else:
+                # 未按住方向键：沿持久方向继续巡逻
+                self._keys.hold_dir(self._phase_dir)
+                self._last_move_pos = cur
+                self._stuck_base_dir = self._phase_dir
+                self._move_stuck_check_at = (now +
+                                             config.MOVE_STUCK_CHECK_INTERVAL)
+                if frame_count % config.LOG_FRAME_INTERVAL == 0:
+                    self.log.info(
+                        f"空闲巡逻（按住"
+                        f"{'右' if self._phase_dir == config.KEY_RIGHT else '左'}）")
 
-        主决策循环先于朝怪移动/空闲随机移动调用本方法（优先级最高），
-        但遵循 _stuck_reverse_until 反向脱困保护：刚反向脱困的一段时间内
-        不覆盖方向，避免回中方向把刚脱困的玩家又拉回墙边。
+    def keep_centered(self, now, px, pw, left_boundary, right_boundary):
+        """五区巡逻禁止区域判定：玩家框触达检测框最左/最右禁止区域边界时，立即
+        按住朝中间区域的方向键反向，返回 True 表示已接管移动方向。
+
+        检测区域按宽度平均分成 5 块：最左 1/5 与最右 1/5 为禁止区域。玩家框
+        左边界触达区块 1 右边界（box_left < left_boundary）按住右、右边界触达
+        区块 5 左边界（box_right > right_boundary）按住左，直到触达另一侧禁止
+        区域；中间 3/5 自由追怪/沿持久方向移动。用玩家框边界而非中心判定，使
+        玩家框不进入禁止区域（仅可触碰其内侧边界）。禁止区域判定优先级最高
+        （立即反向），并同步更新持久方向 _phase_dir，使玩家离开禁止区域后继续
+        沿反向巡逻。
 
         Args:
             now: 当前时间戳
             px: 当前玩家中心 X（检测坐标系）
+            pw: 当前玩家框宽度（像素）
             left_boundary: 左块与中间块的分界 X（检测坐标系）
             right_boundary: 中间块与右块的分界 X（检测坐标系）
 
         Returns:
-            True 表示玩家已进入左/右块，已按住回中方向键（本帧不再做追怪/随机移动）；
-            False 表示玩家在中间块内（或处于反向脱困保护期），未接管。
+            True 表示玩家框已触达左/右禁止区域边界，已按住反向方向键
+            （本帧不再做追怪）；False 表示玩家框在中间块内，未接管。
         """
-        # 反向脱困保护期内不覆盖方向，让反向移动先跑完脱困
-        if now < self._stuck_reverse_until:
-            return False
-        if px < left_boundary:
-            center_dir = config.KEY_RIGHT  # 进入左块 → 往右回中
-        elif px > right_boundary:
-            center_dir = config.KEY_LEFT   # 进入右块 → 往左回中
+        box_left = px - pw / 2
+        box_right = px + pw / 2
+        if box_left < left_boundary:
+            center_dir = config.KEY_RIGHT  # 框左边界触达区块1右边界 → 往右反向
+        elif box_right > right_boundary:
+            center_dir = config.KEY_LEFT   # 框右边界触达区块5左边界 → 往左反向
         else:
-            # 在中间块内，清除回中状态（下次进入左/右块时重新记日志）
+            # 玩家框整体在中间块内，清除回中状态（下次触达边界时重新记日志）
             self._centering_dir = None
             return False
         self._keys.hold_dir(center_dir)
-        # 换向/重新进入时各记一次日志，避免每帧刷屏
+        self._phase_dir = center_dir  # 持久方向同步为反向方向
+        # 换向/重新触达边界时各记一次日志，避免每帧刷屏
         if self._centering_dir != center_dir:
             self.log.info(
-                f"玩家进入检测框"
-                f"{'左' if center_dir == config.KEY_RIGHT else '右'}区"
+                f"玩家框触达检测框"
+                f"{'左' if center_dir == config.KEY_RIGHT else '右'}禁止区边界"
                 f"（px={px:.0f}，中区 [{left_boundary:.0f}, "
                 f"{right_boundary:.0f}]），按住"
-                f"{'右' if center_dir == config.KEY_RIGHT else '左'}回中")
+                f"{'右' if center_dir == config.KEY_RIGHT else '左'}反向")
             self._centering_dir = center_dir
         return True
 
@@ -208,61 +221,11 @@ class MonsterTracker:
                else config.KEY_LEFT)
         self._keys.hold_dir(opp)
         self._stuck_base_dir = opp
-        # 重置随机切换时间点，避免反向后立刻又被随机切换覆盖
-        self._move_switch_at = now + jitter(config.IDLE_SWITCH_INTERVAL,
-                                            config.IDLE_SWITCH_JITTER)
+        self._phase_dir = opp  # 持久方向同步为反向方向
         # 记录反向脱困时刻：该时长内不让他处逻辑覆盖反向方向
         self._stuck_reverse_until = now + config.STUCK_REVERSE_HOLD_TIME
         self.log.info(f"移动被阻挡（{config.MOVE_STUCK_CHECK_INTERVAL:.0f}s 位移 "
                       f"{moved}px），立即反向按住"
-                      f"{'右' if opp == config.KEY_RIGHT else '左'}")
-        return True
-
-    def keep_in_range(self, now, px):
-        """水平移动范围限制：玩家 X 相对启动基准越出单侧上限时立即反向。
-
-        仅对指定怪物分类（--monster lvmogu）启用时由主决策循环调用。
-        基准位置（_range_anchor_x）取首次调用时的玩家 X；玩家向左/右各最多
-        移动 move_limit_pixels 像素，到达边界立即向相反方向按住。
-
-        与卡住反向脱困（check_stuck_and_reverse）同一套状态机制：
-        - 反向按住并刷新卡住检测基准点，避免刚反向又被误判"卡住"；
-        - 重置随机切换时间点，避免刚反向立刻又被随机移动切换覆盖；
-        - 记录反向时刻 _stuck_reverse_until（MOVE_LIMIT_REVERSE_HOLD_TIME），
-          期间不让他处逻辑（如朝怪物方向移动）覆盖反向方向。
-
-        Args:
-            now: 当前时间戳
-            px: 当前玩家中心 X（检测坐标系）
-
-        Returns:
-            True 表示本次触发了反向；False 表示正常/已初始化/未按住方向键
-        """
-        if self._range_anchor_x is None:
-            self._range_anchor_x = px
-            return False
-        held = self._keys.held_move_key
-        if held is None:
-            return False
-        lo = self._range_anchor_x - config.MOVE_LIMIT_PIXELS
-        hi = self._range_anchor_x + config.MOVE_LIMIT_PIXELS
-        opp = None
-        if held == config.KEY_RIGHT and px >= hi:
-            opp = config.KEY_LEFT
-        elif held == config.KEY_LEFT and px <= lo:
-            opp = config.KEY_RIGHT
-        if opp is None:
-            return False
-        self._keys.hold_dir(opp)
-        self._stuck_base_dir = opp
-        self._last_move_pos = None  # 重置卡住检测基准点，反向重新计时
-        self._move_stuck_check_at = now + config.MOVE_STUCK_CHECK_INTERVAL
-        # 重置随机切换时间点，避免反向后立刻又被随机移动切换覆盖
-        self._move_switch_at = now + jitter(config.IDLE_SWITCH_INTERVAL,
-                                            config.IDLE_SWITCH_JITTER)
-        self._stuck_reverse_until = now + config.MOVE_LIMIT_REVERSE_HOLD_TIME
-        self.log.info(f"超出水平移动范围（单侧 "
-                      f"{config.MOVE_LIMIT_PIXELS}px，px={px:.0f}），反向按住"
                       f"{'右' if opp == config.KEY_RIGHT else '左'}")
         return True
 
@@ -286,10 +249,9 @@ class MonsterTracker:
         对应原 _release_all 的状态清理部分；物理按键由
         KeyControl.release_all() 负责，GameBot.stop() 需两者都调。
         """
-        self._move_switch_at = 0.0
         self._last_move_pos = None
         self._move_stuck_check_at = 0.0
         self._stuck_base_dir = None
         self._stuck_reverse_until = 0.0
-        self._range_anchor_x = None  # 重置移动范围基准，下次启动重新取玩家 X
         self._centering_dir = None  # 清除居中校正方向
+        self._phase_dir = None  # 清除五区巡逻持久方向

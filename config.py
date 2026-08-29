@@ -77,11 +77,6 @@ def _to_key(v):
     return getattr(Key, str(v).strip().lower())
 
 
-def _to_str_list(v):
-    """字符串列表：TOML 数组转为 Python 字符串列表。"""
-    return [str(x).strip() for x in v]
-
-
 # ---------------------------------------------------------------------- #
 #  参数表：[(TOML节, TOML键, 全局变量名, 转换函数或 None)]
 # ---------------------------------------------------------------------- #
@@ -100,9 +95,7 @@ _SCHEMA = [
     ("detect", "strip_y_pad", "STRIP_Y_PAD", None),
     ("detect", "player_detect_x_shrink", "PLAYER_DETECT_X_SHRINK", None),
     ("detect", "player_cache_ttl", "PLAYER_CACHE_TTL", None),
-    ("detect", "keep_centered_enabled", "KEEP_CENTERED_ENABLED", None),
-    ("detect", "keep_centered_enabled_categories",
-     "KEEP_CENTERED_ENABLED_CATEGORIES", _to_str_list),
+    ("detect", "player_top_gap", "PLAYER_TOP_GAP", None),
     ("detect", "keep_centered_middle_fraction", "KEEP_CENTERED_MIDDLE_FRACTION",
      None),
 
@@ -148,8 +141,6 @@ _SCHEMA = [
     ("operation", "attack_jitter", "ATTACK_JITTER", None),
     ("operation", "pickup_count", "PICKUP_COUNT", None),
     ("operation", "pickup_interval", "PICKUP_INTERVAL", None),
-    ("operation", "idle_switch_interval", "IDLE_SWITCH_INTERVAL", None),
-    ("operation", "idle_switch_jitter", "IDLE_SWITCH_JITTER", None),
     ("operation", "move_stuck_check_interval", "MOVE_STUCK_CHECK_INTERVAL",
      None),
     ("operation", "move_stuck_threshold", "MOVE_STUCK_THRESHOLD", None),
@@ -174,13 +165,6 @@ _SCHEMA = [
 
     # ---- [window] 游戏窗口识别 ----
     ("window", "game_window_keyword", "GAME_WINDOW_KEYWORD", None),
-
-    # ---- [movement] 水平移动范围限制（仅对指定怪物分类生效） ----
-    ("movement", "move_limit_enabled_categories",
-     "MOVE_LIMIT_ENABLED_CATEGORIES", _to_str_list),
-    ("movement", "move_limit_pixels", "MOVE_LIMIT_PIXELS", None),
-    ("movement", "move_limit_reverse_hold_time", "MOVE_LIMIT_REVERSE_HOLD_TIME",
-     None),
 ]
 
 

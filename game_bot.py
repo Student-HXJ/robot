@@ -3,17 +3,15 @@
 
 组装各核心模块：ScreenCapture / KeyControl / MonsterDetector /
 MonsterTracker / HPMPMonitor / PetFeeder，由单一决策循环驱动：
-1. 玩家居中校正（仅 --monster yezhu 等指定分类启用，最高优先级）：玩家 X
-   进入检测框最左/右区 → 立即回中，优先于追踪怪物的移动（只覆盖移动方向，
+1. 五区巡逻禁区判定（最高优先级）：玩家框触达检测框最左/最右禁止区域边界
+   → 立即反向，优先于追踪怪物的移动（只覆盖移动方向，
    不覆盖攻击）
 2. 检测怪物位置，移动到怪物附近攻击
 3. 怪物在攻击距离内 → 朝其方向攻击
 4. 怪物在攻击距离外 → 移动靠近（持续按住方向键）
-5. 无怪物 → 捡东西 / 随机移动防掉线
+5. 无怪物 → 捡东西 / 沿持久方向巡逻移动（触达禁止区域才反向）
 6. HP <= 阈值按键 9 补血，MP <= 阈值按键 0 补蓝
 7. 每 FEED_PET_INTERVAL 自动喂食宠物
-8. 水平移动范围限制（--monster lvmogu 等启用分类）：玩家左右移动相对启动
-   位置单侧不超过 move_limit_pixels 像素，越界立即反向防跑出挂机区域
 
 按键说明：
   F9 启动/停止机器人；F10 开启/关闭 HP/MP 监控 + 喂食宠物；F8 退出。
@@ -148,54 +146,34 @@ class GameBot:
         Returns:
             简化格式 [(cx, cy, dist, direction, name, score, in_range), ...]
         """
-        monsters_raw, _ = self.detector.detect_once(save_annotated=False)
+        monsters_raw, _ = self.detector.detect_once(save_annotated=True)
         return [(m[0], m[1], m[6], m[9], m[8], m[7], m[10])
                 for m in monsters_raw]
 
-    def _enforce_move_limit(self, now):
-        """水平移动范围限制：仅对指定分类（如 --monster lvmogu）生效。
-
-        玩家 X 相对启动时的位置，向左/右各最多移动 move_limit_pixels 像素；
-        到达边界且玩家位置可信时立即反向，防止跑出固定挂机区域。
-        攻击/拾取时未按住方向键，本步自动跳过。
-        """
-        if not self.detector.move_limit_enabled:
-            return
-        held = self.keys.held_move_key
-        if held is None:
-            return
-        # 玩家位置当前可信（本帧检测到或缓存未过期）才做边界判定，
-        # 避免用回退/猜测位置误判越界
-        if not self.detector.player_known:
-            return
-        px = self.detector.player_cx()
-        self.tracker.keep_in_range(now, px)
-
     def _keep_centered(self, now):
-        """玩家居中校正：玩家 X 进入检测框最左/最右区域时，立即回中。
+        """五区巡逻禁区判定：玩家框触达检测框最左/最右禁止区域边界时，立即反向。
 
-        仅对 config.keep_centered_enabled_categories 指定的分类生效
-        （如 --monster yezhu）；其他分类不启用居中校正，保持追怪为主 +
-        卡住反向脱困。中间区域宽度占比 keep_centered_middle_fraction
-        （默认 0.6 = 3/5，等价于把检测框平均分成 5 块、只让最左/最右各
-        1/5 触发回中）：玩家在中间区域自由活动不调整，进入最左区域
-        （左分界外）按住右、进入最右区域（右分界外）按住左，尽量保持
-        在中间区域。优先级高于"朝怪物移动/空闲随机移动"（只覆盖移动方向，
-        不覆盖攻击）。仅在玩家位置可信时生效，避免用过期或回退的中心
-        猜测位置误判。
+        把检测框按宽度平均分成 5 块，最左 1/5 与最右 1/5 为禁止区域：玩家框
+        左边界触达区块 1 右边界（左分界）按住右、右边界触达区块 5 左边界
+        （右分界）按住左，立即反向直到触达另一侧禁止区域；中间 3/5（宽度占比
+        keep_centered_middle_fraction，默认 0.6）自由追怪/沿持久方向移动。
+        用玩家框边界而非中心判定，使玩家框不进入禁止区域。优先级高于
+        "朝怪物移动/空闲巡逻移动"（只覆盖移动方向，不覆盖攻击）。
+        仅在玩家位置可信时生效，避免用过期或回退的位置误判。
         """
-        if not (config.KEEP_CENTERED_ENABLED
-                and self.detector.keep_centered_enabled
-                and self.detector.player_known):
+        if not self.detector.player_known:
             return False
-        px = self.detector.player_cx()
+        pb = self.detector.player_box
+        if pb is None:
+            return False
+        px, pw = pb[4], pb[2]
         # 检测坐标系：窄条与检测区域同宽同左，玩家 X 落在 [0, 宽度] 内
         w = self.detector.detect_region[2]
-        # 回中分界 X：中间区域宽度 = 宽度 * keep_centered_middle_fraction，
-        # 左/右各留 (1 - 比例)/2 宽度的触发区
+        # 五区边界 X：中间区域宽度 = 宽度 * keep_centered_middle_fraction，
+        # 左/右各留 (1 - 比例)/2 宽度的禁止区域
         left_boundary = w * (1 - config.KEEP_CENTERED_MIDDLE_FRACTION) / 2
         right_boundary = w * (1 + config.KEEP_CENTERED_MIDDLE_FRACTION) / 2
-        return self.tracker.keep_centered(now, px, left_boundary,
+        return self.tracker.keep_centered(now, px, pw, left_boundary,
                                           right_boundary)
 
     # ------------------------------------------------------------------ #
@@ -206,13 +184,12 @@ class GameBot:
         """主决策循环。
 
         每轮执行：
-        0. 玩家居中校正（仅指定分类如 --monster yezhu 启用）：玩家 X 进入
-           检测框最左/右区 → 立即回中，本帧不再做朝怪移动/空闲随机移动
-           （攻击仍优先执行）
+        0. 五区巡逻禁区判定（最高优先级）：玩家框触达检测框最左/最右禁止
+           区域边界 → 立即反向，本帧不再做朝怪移动/空闲巡逻移动（攻击仍优先执行）
         1. 检测怪物
         2. 有怪物在攻击范围内 → 攻击
-        3. 有怪物但超出范围 → 移动靠近（持续按住方向键；回中期间跳过）
-        4. 无怪物 → 捡东西 / 随机移动（回中期间跳过随机移动）
+        3. 有怪物但超出范围 → 移动靠近（持续按住方向键；禁止区反向期间跳过）
+        4. 无怪物 → 捡东西 / 沿持久方向巡逻（禁止区反向期间跳过巡逻移动）
         """
         last_pickup = 0.0
         frame_count = 0
@@ -231,8 +208,8 @@ class GameBot:
             pb = self.detector.player_box
             cur = (pb[4], pb[5]) if pb else None
 
-            # 0. 玩家居中校正（最高优先级）：偏离检测框中心 → 立即回中，
-            #    接管移动方向，本帧不再朝怪移动/随机移动
+            # 0. 五区巡逻禁区判定（最高优先级）：触达检测框最左/最右禁止区域
+            #    → 立即反向，接管移动方向，本帧不再朝怪移动/巡逻移动
             centering = self._keep_centered(now)
 
             if monsters:
@@ -284,11 +261,6 @@ class GameBot:
 
                         # 已按住方向键则保持不动，不松开
                         time.sleep(0.05)
-
-            # 2. 水平移动范围限制（--monster lvmogu 等启用分类时）：玩家 X
-            #    相对启动位置单侧越界 → 立即反向（攻击/拾取时未按住方向键，
-            #    本步自动跳过）
-            self._enforce_move_limit(now)
 
     def close(self):
         """释放资源。"""
@@ -351,19 +323,9 @@ def main():
     print(f"  - 怪物检测: core/monster_detector.py")
     print(f"  - 怪物分类: {monster_dir}（启动时已确定，F9 不再询问）")
     print(f"  - 匹配阈值: {config.MATCH_THRESHOLD}")
-    if bot.detector.move_limit_enabled:
-        print(f"  - 水平移动范围: ±{config.MOVE_LIMIT_PIXELS}px"
-              f"（相对启动位置，越界反向）")
-    else:
-        print("  - 水平移动范围: 不限制（仅指定分类启用，见 config.toml "
-              "[movement].move_limit_enabled_categories）")
-    if config.KEEP_CENTERED_ENABLED and bot.detector.keep_centered_enabled:
-        print(f"  - 玩家居中校正: 开启（检测区域中区"
-              f"≈{config.KEEP_CENTERED_MIDDLE_FRACTION * 100:.0f}%宽度内自由活动，"
-              f"进入最左/右区立即回中，优先于追怪移动）")
-    else:
-        print("  - 玩家居中校正: 关闭（仅指定分类启用，见 config.toml "
-              "[detect].keep_centered_enabled_categories）")
+    print(f"  - 五区巡逻: 开启（检测区域均分 5 块，最左/最右 1/5 为禁止区域，"
+          f"触达立即反向；中间 "
+          f"≈{config.KEEP_CENTERED_MIDDLE_FRACTION * 100:.0f}% 宽度内自由追怪/巡逻）")
     print(f"  - 检测区域: {bot.detector.detect_region}")
     print("=" * 60)
 

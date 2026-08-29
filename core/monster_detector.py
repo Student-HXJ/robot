@@ -79,29 +79,21 @@ class MonsterDetector:
 
         # 窄条截图区域：只截取水平线附近，提升速度
         # y_pad 覆盖紫框范围 + 余量，确保近身大怪物不被截断
-        y_pad = config.MONSTER_DETECT_Y_TOLERANCE + config.STRIP_Y_PAD
-        self._strip_region = (
-            self._detect_region[0],
-            self._detect_region[1] + self._player_pos[1] - y_pad,
-            self._detect_region[2],
-            y_pad * 2,
-        )
+        self._y_pad = config.MONSTER_DETECT_Y_TOLERANCE + config.STRIP_Y_PAD
+
+        # 检测框顶部（动态）：随玩家上下移动整体平移。初始按配置（玩家在检测区
+        # 垂直中心）。检测到玩家后按「玩家框上边界 = 检测框上边界 + PLAYER_TOP_GAP」
+        # 逐帧调整；未检测到玩家时保持上次位置。
+        self._strip_top = (self._detect_region[1] + self._player_pos[1]
+                           - self._y_pad)
+        self._strip_region = (self._detect_region[0], self._strip_top,
+                              self._detect_region[2], self._y_pad * 2)
         # 窄条内的玩家位置（Y = y_pad，即窄条垂直中心）
-        self._strip_player_pos = (self._player_pos[0], y_pad)
+        self._strip_player_pos = (self._player_pos[0], self._y_pad)
 
         # 实时刷新图路径（项目根目录）
         self._live_frame_path = os.path.join(config.BASE_DIR,
                                              "detect_live.png")
-
-        # 水平移动范围限制：仅对 config.MOVE_LIMIT_ENABLED_CATEGORIES 指定的
-        # 怪物分类启用（如 --monster lvmogu）。须在 set_monster_dir() 之前初始化，
-        # 因为模板加载时会一并确定是否启用移动范围限制。
-        self.move_limit_enabled = False
-
-        # 居中校正（检测框五区回中）：仅对 config.KEEP_CENTERED_ENABLED_CATEGORIES
-        # 指定的怪物分类启用（如 --monster yezhu）。同样在 set_monster_dir()
-        # 模板加载时一并确定是否启用。
-        self.keep_centered_enabled = False
 
         # 加载怪物模板（含镜像，怪物有左右两个朝向）
         self.templates = []
@@ -186,20 +178,6 @@ class MonsterDetector:
             print(f"[WARN] 未加载到任何怪物模板！请检查 "
                   f"{self.monster_dir}/ 目录")
 
-        # 水平移动范围限制：仅对指定怪物分类启用（如 --monster lvmogu）
-        category = os.path.basename(self.monster_dir.rstrip("/\\"))
-        self.move_limit_enabled = (
-            category in config.MOVE_LIMIT_ENABLED_CATEGORIES)
-        if self.move_limit_enabled:
-            print(f"[INFO] 已启用水平移动范围限制（分类 {category}）: "
-                  f"单侧 ±{config.MOVE_LIMIT_PIXELS}px")
-
-        # 居中校正（检测框五区回中）：仅对指定怪物分类启用（如 --monster yezhu）
-        self.keep_centered_enabled = (
-            category in config.KEEP_CENTERED_ENABLED_CATEGORIES)
-        if self.keep_centered_enabled:
-            print(f"[INFO] 已启用居中校正（分类 {category}）: "
-                  f"中间区域宽度 {config.KEEP_CENTERED_MIDDLE_FRACTION:.0%}")
         return len(self.templates)
 
     def _calc_detect_region(self):
@@ -211,6 +189,12 @@ class MonsterDetector:
         margin = config.DETECT_SIDE_MARGIN
         return ((mon_w - w) // 2 + margin,
                 (mon_h - h) // 2, w - margin * 2, h)
+
+    def _clamp_strip_top(self):
+        """把动态检测框顶部限制在屏幕范围内（不能超出屏幕上下边界）。"""
+        _, mon_h = self._cap.primary_size()
+        strip_h = self._y_pad * 2
+        self._strip_top = max(0, min(self._strip_top, mon_h - strip_h))
 
     # ------------------------------------------------------------------ #
     #  检测线程控制（独立检测 CLI 使用）
@@ -294,7 +278,9 @@ class MonsterDetector:
                         in_range), ...] 按 dist 升序
             nearest: monsters[0] 或 None
         """
-        # 截图
+        # 截图：每次按当前动态检测框顶部重新计算窄条区域（检测框随玩家上下平移）
+        self._strip_region = (self._detect_region[0], self._strip_top,
+                              self._detect_region[2], self._y_pad * 2)
         color_img = self._cap.grab_region(self._strip_region)
         screen_gray = cv2.cvtColor(color_img, cv2.COLOR_BGR2GRAY)
 
@@ -307,6 +293,10 @@ class MonsterDetector:
         if player is not None:
             self._last_player = player
             self._player_last_seen = now
+            # 动态调整检测框顶部：玩家框上边界（player[3]=py，窄条坐标系）与检测框
+            # 上边界保持 PLAYER_TOP_GAP 像素距离，检测框整体平移（顶部 += py - gap）
+            self._strip_top += (player[3] - config.PLAYER_TOP_GAP)
+            self._clamp_strip_top()
         # 玩家位置是否仍可信：本帧检测到，或缓存未过期（PLAYER_CACHE_TTL 内）
         self._player_known = ((now - self._player_last_seen)
                               <= config.PLAYER_CACHE_TTL)
