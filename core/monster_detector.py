@@ -3,7 +3,7 @@
 
 组装 PlayerDetector / AttackDistance / TemplateLoader / ScreenCapture，
 对外提供一次完整检测 ``detect_once()``，内部完成：
-1. 截取游戏画面窄条区域（覆盖玩家水平线附近）
+1. 按配置检测区域截取游戏画面（固定区域，不做动态调整）
 2. 玩家位置检测（委托 PlayerDetector）
 3. 紫框范围内怪物检测（模板匹配 + 多尺度 + 镜像）
 4. 面积/置信度过滤 + 攻击距离判定（委托 attack_distance）
@@ -14,7 +14,7 @@
 视觉标注（detect_live.png）：
 - 绿色框   = 玩家检测框
 - 红色十字 = 玩家中心
-- 紫色框   = 怪物监控范围（玩家 Y 上下各 ATTACK_RADIUS）
+- 紫色框   = 怪物监控范围（固定为整个检测区域，不随玩家移动）
 - 红色框   = 检测到的怪物
 - 黄色框   = 在攻击距离内（与玩家 X 距离 <= 阈值）的怪物
 
@@ -24,7 +24,6 @@
 import os
 import threading
 import time
-from collections import deque
 
 import cv2
 
@@ -32,8 +31,7 @@ import config
 from core import attack_distance
 from core.player_detector import PlayerDetector
 from core.screencap import ScreenCapture
-from core.template_matcher import (TemplateLoader, match_templates,
-                                   non_max_suppression, select_monster_category)
+from core.template_matcher import (TemplateLoader, match_templates, non_max_suppression, select_monster_category)
 
 
 class MonsterDetector:
@@ -68,32 +66,18 @@ class MonsterDetector:
         # 帧计数器（用于降低日志频率）
         self._frame_count = 0
 
-        # 检测区域
+        # 检测区域：固定按 config.toml [detect] detect_region 抓图，
+        # 不做随玩家上下移动的动态检测框调整（已移除）
         self._detect_region = self._calc_detect_region()
 
-        # 玩家初始参考位置（检测区域中心，首次检测前的猜测值）
+        # 玩家参考位置（检测区域中心）：首次检测前 / 检测失败时的回退值
         self._player_pos = (
             self._detect_region[2] // 2,
             self._detect_region[3] // 2,
         )
 
-        # 窄条截图区域：只截取水平线附近，提升速度
-        # y_pad 覆盖紫框范围 + 余量，确保近身大怪物不被截断
-        self._y_pad = config.MONSTER_DETECT_Y_TOLERANCE + config.STRIP_Y_PAD
-
-        # 检测框顶部（动态）：随玩家上下移动整体平移。初始按配置（玩家在检测区
-        # 垂直中心）。检测到玩家后按「玩家框上边界 = 检测框上边界 + PLAYER_TOP_GAP」
-        # 逐帧调整；未检测到玩家时保持上次位置。
-        self._strip_top = (self._detect_region[1] + self._player_pos[1]
-                           - self._y_pad)
-        self._strip_region = (self._detect_region[0], self._strip_top,
-                              self._detect_region[2], self._y_pad * 2)
-        # 窄条内的玩家位置（Y = y_pad，即窄条垂直中心）
-        self._strip_player_pos = (self._player_pos[0], self._y_pad)
-
         # 实时刷新图路径（项目根目录）
-        self._live_frame_path = os.path.join(config.BASE_DIR,
-                                             "detect_live.png")
+        self._live_frame_path = os.path.join(config.BASE_DIR, "detect_live.png")
 
         # 加载怪物模板（含镜像，怪物有左右两个朝向）
         self.templates = []
@@ -101,20 +85,15 @@ class MonsterDetector:
             self.set_monster_dir(self.monster_dir)
 
         # 玩家检测器（加载玩家模板，含镜像）
-        self._player_detector = PlayerDetector(self._detect_region[2],
-                                               self._detect_region[3])
+        self._player_detector = PlayerDetector(self._detect_region[2], self._detect_region[3])
 
         # 最近一次检测的玩家框（供 GameBot 读取玩家中心/位置）
         self._player_box = None  # (x, y, w, h, cx, cy)
 
-        # 玩家位置缓存：检测失败时回退到上次成功位置，而非检测条中心
+        # 玩家位置缓存：检测失败时回退到上次成功位置，而非检测区域中心
         self._last_player = None  # 最近一次成功检测到的玩家完整元组
         self._player_last_seen = 0.0  # 最近一次成功检测到玩家的时间戳
         self._player_known = False  # 玩家位置当前是否可信（本帧检测到或缓存未过期）
-
-        # 最近两帧的怪物位置（用于多帧确认，过滤闪烁噪声）。
-        # 保存两帧可容忍单帧漏检，避免真实怪因偶尔一帧未检测到而无法确认。
-        self._recent_monsters = deque(maxlen=2)  # [ [(cx, cy), ...], ... ]
 
     # ------------------------------------------------------------------ #
     #  对外只读状态（供 GameBot 使用）
@@ -124,11 +103,6 @@ class MonsterDetector:
     def player_box(self):
         """最近一次检测的玩家框 (x, y, w, h, cx, cy)，未检测到玩家时为 None。"""
         return self._player_box
-
-    @property
-    def strip_player_pos(self):
-        """窄条内的玩家参考位置 (x, y)，玩家检测失败时的回退值。"""
-        return self._strip_player_pos
 
     @property
     def detect_region(self):
@@ -148,7 +122,7 @@ class MonsterDetector:
     def player_cx(self):
         """当前玩家中心 X；检测失败时回退到上次已知位置（缓存）。"""
         pb = self._player_box
-        return pb[4] if pb else self._strip_player_pos[0]
+        return pb[4] if pb else self._player_pos[0]
 
     # ------------------------------------------------------------------ #
     #  模板目录
@@ -169,11 +143,7 @@ class MonsterDetector:
         recursive = (self.monster_dir == config.MONSTER_DIR)
         print(f"[INFO] 怪物模板目录: {self.monster_dir}"
               f"{'（递归所有分类）' if recursive else ''}")
-        self.templates = TemplateLoader(self.monster_dir,
-                                        with_mirror=True,
-                                        recursive=recursive).load(
-                                            self._detect_region[2],
-                                            self._detect_region[3])
+        self.templates = TemplateLoader(self.monster_dir, with_mirror=True, recursive=recursive).load(self._detect_region[2], self._detect_region[3])
         if not self.templates:
             print(f"[WARN] 未加载到任何怪物模板！请检查 "
                   f"{self.monster_dir}/ 目录")
@@ -184,17 +154,6 @@ class MonsterDetector:
         """计算检测区域（左右各向内收缩 DETECT_SIDE_MARGIN 像素）。"""
         if config.DETECT_REGION is not None:
             return config.DETECT_REGION
-        mon_w, mon_h = self._cap.primary_size()
-        w, h = 900, 450
-        margin = config.DETECT_SIDE_MARGIN
-        return ((mon_w - w) // 2 + margin,
-                (mon_h - h) // 2, w - margin * 2, h)
-
-    def _clamp_strip_top(self):
-        """把动态检测框顶部限制在屏幕范围内（不能超出屏幕上下边界）。"""
-        _, mon_h = self._cap.primary_size()
-        strip_h = self._y_pad * 2
-        self._strip_top = max(0, min(self._strip_top, mon_h - strip_h))
 
     # ------------------------------------------------------------------ #
     #  检测线程控制（独立检测 CLI 使用）
@@ -204,8 +163,7 @@ class MonsterDetector:
         """启动检测工作线程。"""
         self.stop_event.clear()
         self.active_event.set()
-        self.worker_thread = threading.Thread(target=self._detect_loop,
-                                              daemon=True)
+        self.worker_thread = threading.Thread(target=self._detect_loop, daemon=True)
         self.worker_thread.start()
 
     def stop(self):
@@ -230,38 +188,25 @@ class MonsterDetector:
     #  检测核心
     # ------------------------------------------------------------------ #
 
-    def _find_monsters(self,
-                       screen_gray,
-                       player_y=None,
-                       fallback=None,
-                       y_offset=0):
+    def _find_monsters(self, screen_gray, y_offset=0):
         """检测怪物。
 
-        怪物检测只在紫色框 ROI（screen_gray）上进行，缩小模板匹配计算量。
-        screen_gray 命中坐标经 y_offset 已统一回全图坐标系，因此 player_y 需
-        传入全图坐标系下的玩家 Y。
+        怪物检测在紫色框 ROI（screen_gray）上进行，缩小模板匹配计算量。
+        紫色框固定为整个检测区域（不随玩家移动），因此 screen_gray 即整张
+        检测区域灰度图，y_offset 恒为 0（保留参数仅为保持接口一致性）。
 
         Returns:
             怪物列表 [(cx, cy, x, y, w, h, score, name, direction), ...]
         """
-        hits = match_templates(screen_gray,
-                               self.templates,
-                               config.MATCH_THRESHOLD,
-                               fallback=fallback,
-                               y_offset=y_offset)
+        hits = match_templates(screen_gray, self.templates, config.MATCH_THRESHOLD, y_offset=y_offset)
         hits = non_max_suppression(hits, config.NMS_DISTANCE)
-        # 紫色框 Y 范围（玩家水平线上下各 ATTACK_RADIUS，未 clamp，用于框完整判定）
-        if player_y is not None:
-            purple_top = player_y - config.ATTACK_RADIUS
-            purple_bottom = player_y + config.ATTACK_RADIUS
-        else:
-            purple_top, purple_bottom = -9999, 9999
+        # 紫色框 = 整个检测区域；怪物检测框必须完全在紫框内
+        roi_h = screen_gray.shape[0]
         monsters = []
         for h in hits:
             cx, cy, w, hgt, score, name, direction = h
             x, y = cx - w // 2, cy - hgt // 2
-            # 怪物检测框必须完全在紫框内
-            if y < purple_top or y + hgt > purple_bottom:
+            if y < 0 or y + hgt > roi_h:
                 continue
             monsters.append((cx, cy, x, y, w, hgt, score, name, direction))
         return monsters
@@ -278,10 +223,8 @@ class MonsterDetector:
                         in_range), ...] 按 dist 升序
             nearest: monsters[0] 或 None
         """
-        # 截图：每次按当前动态检测框顶部重新计算窄条区域（检测框随玩家上下平移）
-        self._strip_region = (self._detect_region[0], self._strip_top,
-                              self._detect_region[2], self._y_pad * 2)
-        color_img = self._cap.grab_region(self._strip_region)
+        # 截图：固定按配置检测区域抓图（不做动态检测框调整）
+        color_img = self._cap.grab_region(self._detect_region)
         screen_gray = cv2.cvtColor(color_img, cv2.COLOR_BGR2GRAY)
 
         # 帧计数（用于降频日志）
@@ -293,13 +236,8 @@ class MonsterDetector:
         if player is not None:
             self._last_player = player
             self._player_last_seen = now
-            # 动态调整检测框顶部：玩家框上边界（player[3]=py，窄条坐标系）与检测框
-            # 上边界保持 PLAYER_TOP_GAP 像素距离，检测框整体平移（顶部 += py - gap）
-            self._strip_top += (player[3] - config.PLAYER_TOP_GAP)
-            self._clamp_strip_top()
         # 玩家位置是否仍可信：本帧检测到，或缓存未过期（PLAYER_CACHE_TTL 内）
-        self._player_known = ((now - self._player_last_seen)
-                              <= config.PLAYER_CACHE_TTL)
+        self._player_known = ((now - self._player_last_seen) <= config.PLAYER_CACHE_TTL)
         if self._player_known and self._last_player is not None:
             player = self._last_player  # 本帧结果优先；失败则用上次已知位置
         else:
@@ -309,21 +247,17 @@ class MonsterDetector:
             pcx, pcy, px, py, pw, ph, pscore = player
             self._player_box = (px, py, pw, ph, pcx, pcy)
         else:
-            pcx, pcy = self._strip_player_pos
+            pcx, pcy = self._player_pos
             self._player_box = None
 
-        # 2. 检测怪物（只处理紫色框 ROI，缩小模板匹配计算量）
-        #     紫色框 Y 范围 = [pcy - ATTACK_RADIUS, pcy + ATTACK_RADIUS]
-        purple_top = max(0, pcy - config.ATTACK_RADIUS)
-        purple_bottom = min(screen_gray.shape[0], pcy + config.ATTACK_RADIUS)
-        purple_roi = screen_gray[purple_top:purple_bottom, :]
-        monsters_raw = self._find_monsters(purple_roi,
-                                           player_y=pcy,
-                                           fallback=screen_gray,
-                                           y_offset=purple_top)
+        # 2. 检测怪物（紫色框固定为整个检测区域，不随玩家 Y 移动）
+        #     紫色框 Y 范围 = [0, 检测区域高]（即配置 detect_region 的坐标）
+        purple_top = 0
+        purple_bottom = screen_gray.shape[0]
+        purple_roi = screen_gray
+        monsters_raw = self._find_monsters(purple_roi, y_offset=0)
 
         # 3. 面积+置信度过滤，计算距离和攻击判定
-        prev_frames = self._recent_monsters  # 最近两帧怪物位置，用于多帧确认
         monsters = []
         for m in monsters_raw:
             cx, cy, x, y, mw, mh, mscore, name, direction = m
@@ -333,32 +267,15 @@ class MonsterDetector:
             if mscore < config.MONSTER_CONFIRM_SCORE:
                 continue
             dist = attack_distance.distance(cx, pcx)
-            # 多帧确认：与最近两帧任一帧同一位置（MONSTER_CONFIRM_DISTANCE 内）
-            # 才算可信，过滤闪烁噪声。容忍一帧漏检，避免真实怪偶尔一帧未检测到
-            # 就无法确认。容忍距离要覆盖摄像机跟随滚动造成的怪物屏幕位移。
-            confirmed = any(
-                abs(cx - q[0]) <= config.MONSTER_CONFIRM_DISTANCE
-                and abs(cy - q[1]) <= config.MONSTER_CONFIRM_DISTANCE
-                for frame in prev_frames
-                for q in frame)
-            # 攻击判定：玩家位置可信 + X 距离 <= 阈值 + 多帧确认
-            in_range = (self._player_known
-                        and attack_distance.in_range(cx, pcx)
-                        and confirmed)
-            monsters.append((cx, cy, x, y, mw, mh, dist, mscore, name,
-                             direction, in_range))
+            # 攻击判定：玩家位置可信 + X 距离 <= 阈值（不做多帧确认）
+            in_range = (self._player_known and attack_distance.in_range(cx, pcx))
+            monsters.append((cx, cy, x, y, mw, mh, dist, mscore, name, direction, in_range))
         monsters.sort(key=lambda m: m[6])
-        # 记录本帧怪物位置（保留最近两帧，容忍单帧漏检）
-        self._recent_monsters.append([(m[0], m[1]) for m in monsters])
 
-        # 存图：只保存怪物检测实际处理的紫色框 ROI（与处理区域完全一致）
-        #       底图为紫色框对应的彩色区域，标注坐标统一减 y_offset 对齐。
+        # 存图：只保存怪物检测实际处理的紫色框 ROI（与处理区域完全一致，即整个检测区域）
         if save_annotated:
-            purple_roi_color = color_img[purple_top:purple_bottom, :].copy()
-            self._annotate(purple_roi_color,
-                           player,
-                           monsters,
-                           y_offset=purple_top)
+            purple_roi_color = color_img.copy()
+            self._annotate(purple_roi_color, player, monsters, y_offset=purple_top)
             cv2.imwrite(self._live_frame_path, purple_roi_color)
         return monsters, (monsters[0] if monsters else None)
 
@@ -368,27 +285,20 @@ class MonsterDetector:
         所有传入坐标均为"全图（strip）坐标系"，通过 y_offset 统一换算到
         当前绘制底图的坐标系，确保绘制底图（处理区域）与坐标一致。
         """
-        det_w = color_img.shape[1]
-        pcx, pcy = ((player[0], player[1] - y_offset) if player else
-                    (self._strip_player_pos[0],
-                     self._strip_player_pos[1] - y_offset))
+        det_h, det_w = color_img.shape[:2]
+        pcx, pcy = ((player[0], player[1] - y_offset) if player else (self._player_pos[0], self._player_pos[1] - y_offset))
 
-        # 紫色框：怪物监控范围（处理图的上下边界）
-        cv2.rectangle(color_img, (0, pcy - config.ATTACK_RADIUS),
-                      (det_w - 1, pcy + config.ATTACK_RADIUS), (255, 0, 255), 2)
+        # 紫色框：怪物监控范围 = 整个检测区域（固定，不随玩家移动）
+        cv2.rectangle(color_img, (0, 0), (det_w - 1, det_h - 1), (255, 0, 255), 2)
 
         # 玩家：绿色检测框 + 红色十字
         if player:
             pcx, pcy, px, py, pw, ph, pscore = player
             py -= y_offset
             pcy -= y_offset
-            cv2.rectangle(color_img, (px, py), (px + pw, py + ph), (0, 255, 0),
-                          2)
-            cv2.drawMarker(color_img, (pcx, pcy), (0, 0, 255),
-                           cv2.MARKER_CROSS, 30, 2)
-            cv2.putText(color_img, f"player {pscore:.2f}",
-                        (pcx + 15, pcy - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-                        (0, 0, 255), 1)
+            cv2.rectangle(color_img, (px, py), (px + pw, py + ph), (0, 255, 0), 2)
+            cv2.drawMarker(color_img, (pcx, pcy), (0, 0, 255), cv2.MARKER_CROSS, 30, 2)
+            cv2.putText(color_img, f"player {pscore:.2f}", (pcx + 15, pcy - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
 
         # 怪物：红色框（攻击范围内为黄色）
         for m in monsters:
@@ -397,12 +307,8 @@ class MonsterDetector:
             my -= y_offset
             color = (0, 255, 255) if in_range else (0, 0, 255)
             cv2.rectangle(color_img, (mx, my), (mx + mw, my + mh), color, 2)
-            cv2.drawMarker(color_img, (mcx, mcy), color, cv2.MARKER_CROSS, 20,
-                           2)
-            cv2.putText(color_img,
-                        f"{int(mdist)}px {mw * mh}{'*' if in_range else ''}",
-                        (mcx + 15, mcy - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-                        color, 1)
+            cv2.drawMarker(color_img, (mcx, mcy), color, cv2.MARKER_CROSS, 20, 2)
+            cv2.putText(color_img, f"{int(mdist)}px {mw * mh}{'*' if in_range else ''}", (mcx + 15, mcy - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
     def _detect_loop(self):
         """工作线程主循环（独立检测 CLI 使用）。"""
@@ -432,12 +338,10 @@ class MonsterDetector:
         img = self._cap.grab_region(self._detect_region)
         px, py = self._player_pos
 
-        # 紫色框
-        cv2.rectangle(img, (0, py - config.ATTACK_RADIUS),
-                      (w - 1, py + config.ATTACK_RADIUS), (255, 0, 255), 2)
+        # 紫色框 = 整个检测区域（固定监控范围，不随玩家移动），与绿色边框重叠
+        cv2.rectangle(img, (0, 0), (w - 1, h - 1), (255, 0, 255), 2)
         # 红色十字
-        cv2.drawMarker(img, (px + 25, py + 10), (0, 0, 255), cv2.MARKER_CROSS,
-                       40, 3)
+        cv2.drawMarker(img, (px + 25, py + 10), (0, 0, 255), cv2.MARKER_CROSS, 40, 3)
         cv2.circle(img, (px + 25, py + 10), 20, (0, 0, 255), 2)
         # 绿色检测区域边框
         cv2.rectangle(img, (0, 0), (w - 1, h - 1), (0, 255, 0), 2)
@@ -447,7 +351,7 @@ class MonsterDetector:
         print(f"[校准] 检测区域: {self._detect_region}")
         print(f"[校准] 玩家位置: {self._player_pos}")
         print(f"[校准] 截图保存: {out_path} (成功={ok})")
-        print(f"[校准] 紫框=监控范围, 红十字=玩家, 绿框=检测区域")
+        print(f"[校准] 紫框=监控范围（固定=整个检测区域）, 红十字=玩家, 绿框=检测区域")
         print(f"[校准] 怪物模板目录: {self.monster_dir}")
         print(f"[校准] 怪物模板数: {len(self.templates)}")
         print(f"[校准] 玩家模板数: {len(self.player_templates)}")
@@ -471,9 +375,7 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description="冒险岛怪物+玩家检测(模板匹配)")
     parser.add_argument("--calibrate", action="store_true", help="校准模式")
-    parser.add_argument("--monster",
-                        default=None,
-                        help="怪物分类名（monster/ 下的子文件夹名），"
+    parser.add_argument("--monster", default=None, help="怪物分类名（monster/ 下的子文件夹名），"
                         "如 zhu；传 all 表示全部；不传则启动时交互选择")
     args = parser.parse_args()
 

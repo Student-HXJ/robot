@@ -3,15 +3,12 @@
 
 组装各核心模块：ScreenCapture / KeyControl / MonsterDetector /
 MonsterTracker / HPMPMonitor / PetFeeder，由单一决策循环驱动：
-1. 五区巡逻禁区判定（最高优先级）：玩家框触达检测框最左/最右禁止区域边界
-   → 立即反向，优先于追踪怪物的移动（只覆盖移动方向，
-   不覆盖攻击）
-2. 检测怪物位置，移动到怪物附近攻击
-3. 怪物在攻击距离内 → 朝其方向攻击
-4. 怪物在攻击距离外 → 移动靠近（持续按住方向键）
-5. 无怪物 → 捡东西 / 沿持久方向巡逻移动（触达禁止区域才反向）
-6. HP <= 阈值按键 9 补血，MP <= 阈值按键 0 补蓝
-7. 每 FEED_PET_INTERVAL 自动喂食宠物
+1. 检测怪物：有怪物时攻击/追怪优先于五分段寻路
+2. 怪物在攻击距离内 → 转身面向怪物方向攻击（绝不朝反方向攻击）
+3. 怪物在攻击距离外 → 移动靠近（持续按住方向键）
+4. 无怪物 → 五分段寻路（禁区判定 + 沿持久方向巡逻）+ 捡东西
+5. HP <= 阈值按键 9 补血，MP <= 阈值按键 0 补蓝
+6. 每 FEED_PET_INTERVAL 自动喂食宠物
 
 按键说明：
   F9 启动/停止机器人；F10 开启/关闭 HP/MP 监控 + 喂食宠物；F8 退出。
@@ -68,13 +65,9 @@ class GameBot:
         self.feeder = PetFeeder(self.keys, log=self.log)
 
         # 怪物检测器（怪物分类已在程序启动时确定，此处加载模板）
-        self.detector = MonsterDetector(monster_dir=config.MONSTER_DIR,
-                                        load_monsters=False,
-                                        screencap=self._cap)
-        loaded = self.detector.set_monster_dir(
-            monster_dir) if monster_dir else 0
-        self.log.info("怪物检测分类: %s（%d 个模板）",
-                      monster_dir if monster_dir else "(未指定)", loaded)
+        self.detector = MonsterDetector(monster_dir=config.MONSTER_DIR, load_monsters=False, screencap=self._cap)
+        loaded = self.detector.set_monster_dir(monster_dir) if monster_dir else 0
+        self.log.info("怪物检测分类: %s（%d 个模板）", monster_dir if monster_dir else "(未指定)", loaded)
 
         # 怪物跟踪器（靠近/随机移动/卡住反向脱困）
         self.tracker = MonsterTracker(self.keys, log=self.log)
@@ -90,8 +83,7 @@ class GameBot:
                 return
             self.stop_event.clear()
             self.active_event.set()
-            self.worker_thread = threading.Thread(target=self._run_bot,
-                                                  daemon=True)
+            self.worker_thread = threading.Thread(target=self._run_bot, daemon=True)
             self.worker_thread.start()
         # 注意：机器人启动不再联动 HP/MP 监控与喂食宠物，二者完全由 F10 控制
 
@@ -146,9 +138,8 @@ class GameBot:
         Returns:
             简化格式 [(cx, cy, dist, direction, name, score, in_range), ...]
         """
-        monsters_raw, _ = self.detector.detect_once(save_annotated=True)
-        return [(m[0], m[1], m[6], m[9], m[8], m[7], m[10])
-                for m in monsters_raw]
+        monsters_raw, _ = self.detector.detect_once(save_annotated=False)
+        return [(m[0], m[1], m[6], m[9], m[8], m[7], m[10]) for m in monsters_raw]
 
     def _keep_centered(self, now):
         """五区巡逻禁区判定：玩家框触达检测框最左/最右禁止区域边界时，立即反向。
@@ -156,10 +147,10 @@ class GameBot:
         把检测框按宽度平均分成 5 块，最左 1/5 与最右 1/5 为禁止区域：玩家框
         左边界触达区块 1 右边界（左分界）按住右、右边界触达区块 5 左边界
         （右分界）按住左，立即反向直到触达另一侧禁止区域；中间 3/5（宽度占比
-        keep_centered_middle_fraction，默认 0.6）自由追怪/沿持久方向移动。
-        用玩家框边界而非中心判定，使玩家框不进入禁止区域。优先级高于
-        "朝怪物移动/空闲巡逻移动"（只覆盖移动方向，不覆盖攻击）。
-        仅在玩家位置可信时生效，避免用过期或回退的位置误判。
+        keep_centered_middle_fraction，默认 0.6）沿持久方向巡逻移动。
+        用玩家框边界而非中心判定，使玩家框不进入禁止区域。仅在无怪物时调用
+        （有怪物时攻击/追怪优先，不做禁区回中），是五分段寻路的禁区判定部分；
+        玩家位置不可信时跳过。
         """
         if not self.detector.player_known:
             return False
@@ -167,14 +158,13 @@ class GameBot:
         if pb is None:
             return False
         px, pw = pb[4], pb[2]
-        # 检测坐标系：窄条与检测区域同宽同左，玩家 X 落在 [0, 宽度] 内
+        # 检测坐标系：截图区域即配置检测区域，玩家 X 落在 [0, 宽度] 内
         w = self.detector.detect_region[2]
         # 五区边界 X：中间区域宽度 = 宽度 * keep_centered_middle_fraction，
         # 左/右各留 (1 - 比例)/2 宽度的禁止区域
         left_boundary = w * (1 - config.KEEP_CENTERED_MIDDLE_FRACTION) / 2
         right_boundary = w * (1 + config.KEEP_CENTERED_MIDDLE_FRACTION) / 2
-        return self.tracker.keep_centered(now, px, pw, left_boundary,
-                                          right_boundary)
+        return self.tracker.keep_centered(now, px, pw, left_boundary, right_boundary)
 
     # ------------------------------------------------------------------ #
     #  主决策循环
@@ -184,12 +174,10 @@ class GameBot:
         """主决策循环。
 
         每轮执行：
-        0. 五区巡逻禁区判定（最高优先级）：玩家框触达检测框最左/最右禁止
-           区域边界 → 立即反向，本帧不再做朝怪移动/空闲巡逻移动（攻击仍优先执行）
-        1. 检测怪物
-        2. 有怪物在攻击范围内 → 攻击
-        3. 有怪物但超出范围 → 移动靠近（持续按住方向键；禁止区反向期间跳过）
-        4. 无怪物 → 捡东西 / 沿持久方向巡逻（禁止区反向期间跳过巡逻移动）
+        0. 检测怪物
+        1. 有怪物在攻击范围内 → 转身面向怪物攻击（攻击逻辑优先于五分段寻路）
+        2. 有怪物但超出范围 → 移动靠近（持续按住方向键）
+        3. 无怪物 → 五分段寻路（禁区判定 + 沿持久方向巡逻）与定时捡东西
         """
         last_pickup = 0.0
         frame_count = 0
@@ -208,14 +196,10 @@ class GameBot:
             pb = self.detector.player_box
             cur = (pb[4], pb[5]) if pb else None
 
-            # 0. 五区巡逻禁区判定（最高优先级）：触达检测框最左/最右禁止区域
-            #    → 立即反向，接管移动方向，本帧不再朝怪移动/巡逻移动
-            centering = self._keep_centered(now)
-
             if monsters:
-                # 优先攻击在攻击范围内的最近怪物
-                in_range_monsters = [m for m in monsters
-                                     if m[6]]  # m[6]=in_range
+                # 攻击逻辑优先于五分段寻路：有怪物时不执行禁区回中，
+                # 直接攻击或追怪（追怪途中撞墙由卡住检测反向脱困）
+                in_range_monsters = [m for m in monsters if m[6]]  # m[6]=in_range
                 if in_range_monsters:
                     # 攻击范围内取最近的
                     target = in_range_monsters[0]  # monsters 已按距离排序
@@ -226,27 +210,22 @@ class GameBot:
                 cx, _, dist, direction, name, score, in_range = target
 
                 if in_range:
-                    # 怪物在攻击距离内
-                    # 根据怪物与玩家实测位置调整朝向再攻击（连续无延迟）。
-                    # 攻击优先级最高，回中先让路；下一帧若仍偏离则继续回中
-                    self.tracker.release_held()
+                    # 怪物在攻击距离内：转身面向怪物攻击（attack_toward
+                    # 内部处理转身/松开当前移动键，确保不朝反方向攻击）
                     px = self.detector.player_cx()
-                    self.keys.attack_toward(cx, px, name, direction, dist,
-                                            score, frame_count)
+                    self.keys.attack_toward(cx, px, name, direction, dist, score, frame_count)
                     last_pickup = now
                 else:
-                    # 怪物超出攻击距离：回中期间不朝怪移动，先回中；
-                    # 玩家在中心容差内才持续按住朝怪物方向移动（不松开）
-                    if not centering:
-                        px = self.detector.player_cx()
-                        self.tracker.hold_toward(cx, px, now, frame_count,
-                                                 name, dist)
-                    # 无论回中还是追怪，只要按住方向键就做卡住检测，
-                    # 靠近/回中途中被墙/怪挡住也立即反向脱困
+                    # 怪物超出攻击距离：持续按住方向键朝怪物移动（不松开）
+                    px = self.detector.player_cx()
+                    self.tracker.hold_toward(cx, px, now, frame_count, name, dist)
+                    # 只要按住方向键就做卡住检测：靠近途中被墙/怪挡住立即反向脱困
                     self.tracker.check_stuck_and_reverse(now, cur)
             else:
-                # 无怪物：定时捡东西；否则回中期间不做随机移动，
-                # 玩家在中心容差内才按住方向键持续随机左右移动（不松开）
+                # 无怪物 → 五分段寻路：禁区判定（玩家框触达检测框最左/最右
+                # 禁止区域边界立即反向）优先接管移动方向，中间区域沿持久方向
+                # 巡逻移动；并按间隔定时捡东西
+                centering = self._keep_centered(now)
                 if now - last_pickup > config.PICKUP_INTERVAL:
                     self.tracker.release_held()
                     self.keys.pickup()
@@ -256,7 +235,7 @@ class GameBot:
                         # 回中中：不随机换向，只做卡住检测
                         self.tracker.check_stuck_and_reverse(now, cur)
                     else:
-                        # 随机移动 + 卡住检测（内部自动初始化基准点）
+                        # 巡逻移动 + 卡住检测（内部自动初始化基准点）
                         self.tracker.idle_wander(now, cur, frame_count)
 
                         # 已按住方向键则保持不动，不松开
@@ -281,9 +260,7 @@ def main():
 
     import argparse
     parser = argparse.ArgumentParser(description="智能游戏机器人")
-    parser.add_argument("--monster",
-                        default=None,
-                        help="怪物分类名（monster/ 下的子文件夹名），如 zhu；"
+    parser.add_argument("--monster", default=None, help="怪物分类名（monster/ 下的子文件夹名），如 zhu；"
                         "传 all 表示全部；不传则在程序启动时交互选择")
     args = parser.parse_args()
 

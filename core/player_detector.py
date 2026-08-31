@@ -1,7 +1,7 @@
 """
 玩家检测模块。
 
-在截图窄条范围内用玩家模板做模板匹配，定位玩家位置。
+在截图检测区域范围内用玩家模板做模板匹配，定位玩家位置。
 与怪物检测共用 template_matcher 的匹配/抑制工具。
 """
 
@@ -31,7 +31,7 @@ class PlayerDetector:
         """检测玩家位置。
 
         Args:
-            screen_gray: 截图窄条灰度图
+            screen_gray: 截图检测区域灰度图
 
         Returns:
             (cx, cy, x, y, w, h, score) 或 None
