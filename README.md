@@ -12,9 +12,7 @@ MapleStory（冒险岛）游戏自动化机器人。**纯图像识别，不读�
 robot/
 ├── config.py                 # 配置加载器（从 config.toml 读取，暴露为 config.X）
 ├── config.toml               # 用户可编辑配置（调参改这里，带中文注释）
-├── config.default.toml       # 内置默认配置模板（打包进 exe，首次运行生成 config.toml）
 ├── game_bot.py               # 主机器人入口（F9 启停 / F10 血蓝+喂宠 / F8 退出）
-├── monster_detect.py         # 独立检测入口（F9 启停 / F8 退出，与功能控制键一致）
 ├── calibrate_hpmp.py         # 检测框/血条/蓝条区域校准 + 存图校验工具
 ├── build_exe.py              # 打包脚本（PyInstaller 生成 dist/game_bot.exe）
 ├── core/                     # 核心模块，每个职责一个类一个文件
@@ -80,9 +78,6 @@ python calibrate_hpmp.py
 检测区域、模板匹配阈值、攻击距离判定、按键映射、操作延迟与抖动、
 卡住检测参数、HP/MP 血条区域与 HSV 颜色阈值、喂食间隔等。
 `config.py` 负责加载并把参数暴露为 `config.X`，模块无需改动。
-
-> 若 `config.toml` 缺失，程序会从内置的 `config.default.toml` 自动生成一份，
-> 方便直接编辑调参。
 
 **区域坐标校准**：检测框 / 血条 / 蓝条区域坐标都通过 `python calibrate_hpmp.py`
 手动框选确定：脚本会把游戏窗口切到前台、截全屏，让你依次框选检测区域、

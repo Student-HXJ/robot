@@ -86,16 +86,12 @@ _SCHEMA = [
     ("path", "monster_dir", "MONSTER_DIR", None),
     ("path", "player_dir", "PLAYER_DIR", None),
 
-    # ---- [detect] 截图区域（检测条） ----
+    # ---- [detect] 截图区域（检测框） ----
     ("detect", "detect_region", "DETECT_REGION", _to_region),
     ("detect", "detect_interval", "DETECT_INTERVAL", None),
     ("detect", "detect_side_margin", "DETECT_SIDE_MARGIN", None),
-    ("detect", "monster_detect_y_tolerance", "MONSTER_DETECT_Y_TOLERANCE",
-     None),
-    ("detect", "strip_y_pad", "STRIP_Y_PAD", None),
     ("detect", "player_detect_x_shrink", "PLAYER_DETECT_X_SHRINK", None),
     ("detect", "player_cache_ttl", "PLAYER_CACHE_TTL", None),
-    ("detect", "player_top_gap", "PLAYER_TOP_GAP", None),
     ("detect", "keep_centered_middle_fraction", "KEEP_CENTERED_MIDDLE_FRACTION",
      None),
 
@@ -116,6 +112,7 @@ _SCHEMA = [
     ("attack", "attack_distance_threshold", "ATTACK_DISTANCE_THRESHOLD",
      None),
     ("attack", "attack_center_offset", "ATTACK_CENTER_OFFSET", None),
+    ("attack", "attack_turn_delay", "ATTACK_TURN_DELAY", None),
 
     # ---- [control_keys] 功能控制键 ----
     ("control_keys", "key_toggle_bot", "KEY_TOGGLE_BOT", _to_key),

@@ -74,28 +74,49 @@ class KeyControl:
                       dist=None,
                       score=None,
                       frame_count=0):
-        """朝怪物方向攻击。
+        """朝怪物方向攻击：先确保面朝怪物再攻击，绝不朝反方向攻击。
 
-        根据怪物中心 cx 相对玩家中心 px 的位置，先按住朝向怪物的方向键
-        再攻击，模拟"转身攻击"。
+        攻击朝向判定：怪物中心 cx 明显在玩家中心 px 左侧（|cx-px| 超过
+        ATTACK_CENTER_OFFSET 死区）按住左、明显在右侧按住右；玩家与怪物
+        大致重叠时跟随当前按住方向（无按住则保持原朝向，避免重叠时左右
+        抖动/反向）。若当前按住方向已面向怪物（正在朝怪物移动），直接攻击
+        不打断移动；否则先松开当前移动键、按住怪物方向键等待转身
+        （ATTACK_TURN_DELAY）完成后再攻击，确保攻击时角色已对准怪物方向。
 
         Args:
             cx, px: 怪物中心 X、玩家中心 X
             name, direction, dist, score: 用于日志的怪物信息
             frame_count: 当前帧计数（用于降频日志）
         """
-        if cx < px:
-            # 怪物在左边，按住左方向键同时攻击
-            pydirectinput.keyDown(config.KEY_LEFT)
-            self.attack()
-            pydirectinput.keyUp(config.KEY_LEFT)
+        if cx < px - config.ATTACK_CENTER_OFFSET:
+            face_key = config.KEY_LEFT
+        elif cx > px + config.ATTACK_CENTER_OFFSET:
+            face_key = config.KEY_RIGHT
         else:
-            # 怪物在右边，按住右方向键同时攻击
-            pydirectinput.keyDown(config.KEY_RIGHT)
+            # 玩家与怪物大致重叠：跟随当前按住方向（无按住则保持原朝向）
+            face_key = self._held_move_key
+
+        if face_key is None or self._held_move_key == face_key:
+            # 已面朝怪物（或重叠且无需转身）：直接攻击，保持当前移动状态
             self.attack()
-            pydirectinput.keyUp(config.KEY_RIGHT)
+        else:
+            # 需要转身：松开当前移动键 → 按住怪物方向键 → 等待转身完成 → 攻击
+            self.release_dir()
+            try:
+                pydirectinput.keyDown(face_key)
+            except Exception as e:
+                self.log.error(f"转身按键 {face_key} 异常: {e}")
+                self.attack()  # 转身失败也照常攻击，避免卡死
+                return
+            time.sleep(config.ATTACK_TURN_DELAY)
+            self.attack()
+            try:
+                pydirectinput.keyUp(face_key)
+            except Exception:
+                pass
         if frame_count % config.LOG_FRAME_INTERVAL == 0:
-            face = "左" if cx < px else "右"
+            face = ("左" if face_key == config.KEY_LEFT
+                    else "右" if face_key == config.KEY_RIGHT else "当前")
             self.log.info(f"朝{face}攻击 {name}({direction}) "
                           f"距离{dist:.0f}px 置信度={score:.2f}")
 
