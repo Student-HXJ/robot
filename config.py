@@ -138,6 +138,7 @@ _SCHEMA = [
     ("operation", "attack_jitter", "ATTACK_JITTER", None),
     ("operation", "pickup_count", "PICKUP_COUNT", None),
     ("operation", "pickup_interval", "PICKUP_INTERVAL", None),
+    ("operation", "auto_pickup_interval", "AUTO_PICKUP_INTERVAL", None),
     ("operation", "move_stuck_check_interval", "MOVE_STUCK_CHECK_INTERVAL",
      None),
     ("operation", "move_stuck_threshold", "MOVE_STUCK_THRESHOLD", None),
