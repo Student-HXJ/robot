@@ -169,6 +169,9 @@ attack_jitter = 0.01
 pickup_count = 3
 # 无怪物时捡东西的间隔（秒）
 pickup_interval = 2.0
+# F10 自动捡东西的间隔（秒）：开 F10 后每隔该间隔三连按 Z 捡一次东西
+# （与 F9 机器人启停独立，默认 1 秒；移动中自动跳过，防止打断方向移动）
+auto_pickup_interval = 0.03
 
 # 卡住检测：每隔该时长检查一次玩家位移，低于阈值视为撞墙/被阻挡
 move_stuck_check_interval = 2.0
