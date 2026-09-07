@@ -9,12 +9,11 @@ MapleStory（冒险岛）游戏自动化机器人。**纯图像识别，不读�
 ## 项目结构
 
 ```
-robot/
+venv/
 ├── config.py                 # 配置加载器（从 config.toml 读取，暴露为 config.X）
 ├── config.toml               # 用户可编辑配置（调参改这里，带中文注释）
 ├── game_bot.py               # 主机器人入口（F9 启停 / F10 血蓝+喂宠 / F8 退出）
 ├── calibrate_hpmp.py         # 检测框/血条/蓝条区域校准 + 存图校验工具
-├── build_exe.py              # 打包脚本（PyInstaller 生成 dist/game_bot.exe）
 ├── core/                     # 核心模块，每个职责一个类一个文件
 │   ├── admin.py              # 管理员提权
 │   ├── utils.py              # 随机抖动 / 日志 / 路径
@@ -89,8 +88,8 @@ HP 血条、MP 蓝条，并生成 `debug_*_mask.png` 等校验图供核对。框
 ## 打包成 exe（跨 Windows 设备使用）
 
 ```bash
-robot/Scripts/python.exe -m pip install pyinstaller   # 仅需一次
-robot/Scripts/python.exe build_exe.py
+venv/Scripts/python.exe -m pip install pyinstaller   # 仅需一次
+venv/Scripts/python.exe build_exe.py
 ```
 
 打包产物在 **`dist/`**，即完整发布包：

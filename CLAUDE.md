@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-python env robot
+python env venv
 
 ## Overview
 
@@ -50,8 +50,8 @@ python monster_detect.py --calibrate     # save calibration_detect.png with boxe
 python calibrate_hpmp.py
 
 # Package into a single exe (uses robot/ venv, install PyInstaller first)
-robot/Scripts/python.exe -m pip install pyinstaller
-robot/Scripts/python.exe build_exe.py
+venv/Scripts/python.exe -m pip install pyinstaller
+venv/Scripts/python.exe build_exe.py
 ```
 
 If no `--monster` is given, the program shows an interactive category menu at startup. Monster categories are subfolders of `monster/` (e.g. `monster/zhu`).

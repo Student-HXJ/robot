@@ -249,17 +249,11 @@ def write_to_config(regions):
 
 def main():
     ensure_admin()
-    print("=" * 60)
-    print("  HP/MP 血条 + 检测区域校准与存图校验工具")
-    print("=" * 60)
-    print("[INFO] 请在游戏窗口处于正常显示状态时运行本工具")
-
     switch_to_game()
 
     full = grab_fullscreen()
     full_path = project_path("debug_fullscreen.png")
     cv2.imwrite(full_path, full)
-    print(f"[INFO] 全屏已保存: {full_path}（可打开查看区域位置）")
 
     regions = try_gui_select(full)
     if regions is None:
@@ -271,22 +265,6 @@ def main():
 
     verify_regions(full, regions)
     write_to_config(regions)
-
-    print()
-    print("=" * 60)
-    print("  校准结果（已写入 config.toml）")
-    print("  [detect] detect_region  →  检测区域")
-    print("  [hpmp] hp_bar_region / mp_bar_region  →  血条/蓝条区域")
-    print("=" * 60)
-    for key, (left, top, w, h) in regions.items():
-        print(f"  {OUTPUT_NAMES[key]} = ({left}, {top}, {w}, {h})")
-    print("=" * 60)
-    print("  请打开以下截图判定识别是否正确：")
-    print("    debug_hp_mask.png / debug_mp_mask.png  <- 红/蓝高亮即识别到的血条")
-    print("    debug_regions_overview.png             <- 全屏总览（三个框）")
-    print("  坐标已写入 config.toml，重启机器人即可生效。")
-    print("  若百分比不合理或框没对准，请重新运行并重新框选。")
-
 
 if __name__ == "__main__":
     try:
