@@ -137,7 +137,6 @@ key_quit = "f8"
 [action_keys]
 
 key_attack = "x"      # 攻击键
-key_pickup = "z"      # 捡东西键
 key_feed_pet = "8"    # 喂食宠物快捷键
 key_hp_potion = "9"   # 补血药水快捷键
 key_mp_potion = "0"   # 补蓝药水快捷键
@@ -164,14 +163,6 @@ dir_hold_jitter = 0.1
 # 攻击间隔（秒）与其抖动（±秒）【预留参数，暂未使用】
 attack_interval = 0.01
 attack_jitter = 0.01
-
-# 捡东西连按次数
-pickup_count = 5
-# 无怪物时捡东西的间隔（秒）
-pickup_interval = 1
-# F10 自动捡东西的间隔（秒）：开 F10 后每隔该间隔三连按 Z 捡一次东西
-# （与 F9 机器人启停独立，默认 1 秒；移动中自动跳过，防止打断方向移动）
-auto_pickup_interval = 3
 
 # 卡住检测：每隔该时长检查一次玩家位移，低于阈值视为撞墙/被阻挡
 move_stuck_check_interval = 1
@@ -212,7 +203,7 @@ mp_color_upper = [130, 255, 255]
 
 # HP/MP 百分比阈值（%），低于此值补药
 hp_threshold = 50.0
-mp_threshold = 50.0
+mp_threshold = 20.0
 
 # HP/MP 检查间隔（秒）
 hp_mp_check_interval = 1.0

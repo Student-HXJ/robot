@@ -6,13 +6,13 @@ MonsterTracker / HPMPMonitor / PetFeeder，由单一决策循环驱动：
 1. 检测怪物：有怪物时攻击/追怪优先于五分段寻路
 2. 怪物在攻击距离内 → 转身面向怪物方向攻击（绝不朝反方向攻击）
 3. 怪物在攻击距离外 → 移动靠近（持续按住方向键）
-4. 无怪物 → 五分段寻路（禁区判定 + 沿持久方向巡逻）+ 捡东西
+4. 无怪物 → 五分段寻路（禁区判定 + 沿持久方向巡逻）
 5. HP <= 阈值按键 9 补血，MP <= 阈值按键 0 补蓝
 6. 每 FEED_PET_INTERVAL 自动喂食宠物
 
 按键说明：
-  F9 启动/停止机器人；F10 开启/关闭 HP/MP 监控 + 喂食宠物 + 自动捡东西；
-  F8 退出。攻击 X | 捡东西 Z | 补HP 9 | 补MP 0 | 喂宠物 8。
+  F9 启动/停止机器人；F10 开启/关闭 HP/MP 监控 + 喂食宠物；
+  F8 退出。攻击 X | 补HP 9 | 补MP 0 | 喂宠物 8。
 """
 
 import ctypes
@@ -25,7 +25,6 @@ from pynput.keyboard import Listener
 import config
 from core import utils
 from core.admin import ensure_admin
-from core.auto_pickup import AutoPickup
 from core.hpmp_monitor import HPMPMonitor
 from core.key_control import KeyControl
 from core.monster_detector import MonsterDetector
@@ -64,12 +63,6 @@ class GameBot:
 
         # 喂食宠物（同受 F10 控制，与 HP/MP 一起开关）
         self.feeder = PetFeeder(self.keys, log=self.log)
-
-        # 自动捡东西（同受 F10 控制；F9 运行时通过 is_busy 跳过防打断移动）
-        self.picker = AutoPickup(
-            self.keys,
-            is_busy=self.active_event.is_set,
-            log=self.log)
 
         # 怪物检测器（怪物分类已在程序启动时确定，此处加载模板）
         self.detector = MonsterDetector(monster_dir=config.MONSTER_DIR, load_monsters=False, screencap=self._cap)
@@ -116,11 +109,11 @@ class GameBot:
             self.start()
 
     # ------------------------------------------------------------------ #
-    #  HP/MP 监控 + 喂食宠物 + 自动捡东西（F10，与机器人启停独立）
+    #  HP/MP 监控 + 喂食宠物（F10，与机器人启停独立）
     # ------------------------------------------------------------------ #
 
     def toggle_hp_mp(self):
-        """切换 HP/MP 监控 + 喂食宠物 + 自动捡东西开关（F10 统一控制）。
+        """切换 HP/MP 监控 + 喂食宠物开关（F10 统一控制）。
 
         血条/蓝条/检测框坐标统一由 calibrate_hpmp.py 校准并写入 config.toml，
         此处不再做运行时自动校准，直接按配置坐标启动监控线程。
@@ -129,13 +122,11 @@ class GameBot:
         if self.hp_mp_enabled:
             self.hpmp.start()
             self.feeder.start()
-            self.picker.start()
         else:
             self.hpmp.stop()
             self.feeder.stop()
-            self.picker.stop()
         status = "开启" if self.hp_mp_enabled else "关闭"
-        self.log.info(f"HP/MP 监控 + 喂食宠物 + 自动捡东西: {status}")
+        self.log.info(f"HP/MP 监控 + 喂食宠物: {status}")
 
     # ------------------------------------------------------------------ #
     #  怪物检测
@@ -186,9 +177,8 @@ class GameBot:
         0. 检测怪物
         1. 有怪物在攻击范围内 → 转身面向怪物攻击（攻击逻辑优先于五分段寻路）
         2. 有怪物但超出范围 → 移动靠近（持续按住方向键）
-        3. 无怪物 → 五分段寻路（禁区判定 + 沿持久方向巡逻）与定时捡东西
+        3. 无怪物 → 五分段寻路（禁区判定 + 沿持久方向巡逻）
         """
-        last_pickup = 0.0
         frame_count = 0
 
         while not self.stop_event.is_set():
@@ -223,7 +213,6 @@ class GameBot:
                     # 内部处理转身/松开当前移动键，确保不朝反方向攻击）
                     px = self.detector.player_cx()
                     self.keys.attack_toward(cx, px, name, direction, dist, score, frame_count)
-                    last_pickup = now
                 else:
                     # 怪物超出攻击距离：持续按住方向键朝怪物移动（不松开）
                     px = self.detector.player_cx()
@@ -233,28 +222,22 @@ class GameBot:
             else:
                 # 无怪物 → 五分段寻路：禁区判定（玩家框触达检测框最左/最右
                 # 禁止区域边界立即反向）优先接管移动方向，中间区域沿持久方向
-                # 巡逻移动；并按间隔定时捡东西
+                # 巡逻移动
                 centering = self._keep_centered(now)
-                if now - last_pickup > config.PICKUP_INTERVAL:
-                    self.tracker.release_held()
-                    self.keys.pickup()
-                    last_pickup = now
+                if centering:
+                    # 回中中：不随机换向，只做卡住检测
+                    self.tracker.check_stuck_and_reverse(now, cur)
                 else:
-                    if centering:
-                        # 回中中：不随机换向，只做卡住检测
-                        self.tracker.check_stuck_and_reverse(now, cur)
-                    else:
-                        # 巡逻移动 + 卡住检测（内部自动初始化基准点）
-                        self.tracker.idle_wander(now, cur, frame_count)
+                    # 巡逻移动 + 卡住检测（内部自动初始化基准点）
+                    self.tracker.idle_wander(now, cur, frame_count)
 
-                        # 已按住方向键则保持不动，不松开
-                        time.sleep(0.05)
+                    # 已按住方向键则保持不动，不松开
+                    time.sleep(0.05)
 
     def close(self):
         """释放资源。"""
         self.hpmp.stop()
         self.feeder.stop()
-        self.picker.stop()
         self.detector.close()  # 共享截屏实例，此处不释放
         self._cap.close()
 
@@ -297,18 +280,15 @@ def main():
     print("  智能游戏机器人已启动")
     print("=" * 60)
     print("  - 按 [F9] 启动/停止机器人")
-    print("  - 按 [F10] 开启/关闭 HP/MP 监控 + 喂食宠物 + 自动捡东西"
-          "（独立开关）")
+    print("  - 按 [F10] 开启/关闭 HP/MP 监控 + 喂食宠物（独立开关）")
     print("  - 按 [F8] 退出程序")
-    print(f"  - 攻击: {config.KEY_ATTACK.upper()} | 捡东西: {config.KEY_PICKUP.upper()}")
+    print(f"  - 攻击: {config.KEY_ATTACK.upper()}")
     print(f"  - 补HP: {config.KEY_HP_POTION} "
           f"(HP<={config.HP_THRESHOLD}%) | "
           f"补MP: {config.KEY_MP_POTION} "
           f"(MP<={config.MP_THRESHOLD}%)")
     print(f"  - 喂食宠物: {config.KEY_FEED_PET} "
           f"(每 {config.FEED_PET_INTERVAL / 60:.0f} 分钟自动按一次)")
-    print(f"  - 自动捡东西: {config.KEY_PICKUP.upper()} "
-          f"(F10 开启后每 {config.AUTO_PICKUP_INTERVAL:.0f} 秒三连按一次)")
     print("  - 移动: 方向键")
     print(f"  - 怪物检测: core/monster_detector.py")
     print(f"  - 怪物分类: {monster_dir}（启动时已确定，F9 不再询问）")
