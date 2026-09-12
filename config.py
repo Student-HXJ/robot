@@ -6,22 +6,20 @@
 保持与旧版 config.py 完全兼容的模块级属性访问方式。
 
 配置文件查找顺序：
-1. ``config.toml``（与程序同一目录，用户可编辑）——存在则直接加载；
-2. ``config.default.toml``（内置默认配置模板）——不存在 config.toml 时，
+1. ``config.toml``（与 config.py 同一目录，用户可编辑）——存在则直接加载；
+2. ``config.default.toml``（默认配置模板）——不存在 config.toml 时，
    复制一份为 config.toml 并加载（首次运行自动生成，方便直接编辑调参）。
 
 路径约定：
-- 脚本方式运行：BASE_DIR = config.py 所在目录（项目根目录）
-- 打包成 exe 运行：BASE_DIR = exe 所在目录
+- BASE_DIR = config.py 所在目录（项目根目录），无论以何种方式启动
+  （``python game_bot.py`` / IDE / 双击等）都以项目根目录为准。
 
 所有输出图片（detect_live.png / debug_*.png 等）写入 BASE_DIR；
-模板目录（monster/、player/）解析使用 ``resource_dir()``：
-优先用 BASE_DIR 下的同名目录（exe 场景可放 exe 旁覆盖/新增模板），
-否则回退到打包进 exe 的默认资源（PyInstaller _MEIPASS）。
+模板目录（monster/、player/）通过 ``resource_dir()`` 解析为
+BASE_DIR 下的同名目录。
 """
 
 import os
-import sys
 
 import numpy as np
 from pynput.keyboard import Key
@@ -33,24 +31,14 @@ import tomllib
 #  路径
 # ---------------------------------------------------------------------- #
 
-def _is_frozen():
-    """是否已打包为 exe（PyInstaller 会设置 sys.frozen）。"""
-    return getattr(sys, "frozen", False)
-
-
-# 项目根目录：脚本方式为本文件目录；exe 方式为 exe 所在目录。
-# 模板目录、输出图片、config.toml 均以此为基准。
-BASE_DIR = (os.path.dirname(os.path.abspath(sys.executable))
-            if _is_frozen() else os.path.dirname(os.path.abspath(__file__)))
+# 项目根目录 = 本文件所在目录。模板目录、输出图片、config.toml 均以此为基准。
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # 用户可编辑配置文件路径
 CONFIG_PATH = os.path.join(BASE_DIR, "config.toml")
 
-# 内置默认配置模板路径（打包进 exe / 随项目分发）
-_DEFAULT_CONFIG = os.path.join(
-    getattr(sys, "_MEIPASS", BASE_DIR) if _is_frozen()
-    else os.path.dirname(os.path.abspath(__file__)),
-    "config.default.toml")
+# 默认配置模板路径（缺失 config.toml 时用于自动生成一份默认配置）
+_DEFAULT_CONFIG = os.path.join(BASE_DIR, "config.default.toml")
 
 
 # ---------------------------------------------------------------------- #
@@ -117,6 +105,7 @@ _SCHEMA = [
     # ---- [control_keys] 功能控制键 ----
     ("control_keys", "key_toggle_bot", "KEY_TOGGLE_BOT", _to_key),
     ("control_keys", "key_toggle_hpmp", "KEY_TOGGLE_HPMP", _to_key),
+    ("control_keys", "key_toggle_aux_skill", "KEY_TOGGLE_AUX_SKILL", _to_key),
     ("control_keys", "key_quit", "KEY_QUIT", _to_key),
 
     # ---- [action_keys] 操作键名（传给 pydirectinput） ----
@@ -126,6 +115,8 @@ _SCHEMA = [
     ("action_keys", "key_mp_potion", "KEY_MP_POTION", None),
     ("action_keys", "key_left", "KEY_LEFT", None),
     ("action_keys", "key_right", "KEY_RIGHT", None),
+    ("action_keys", "key_skill_move", "KEY_SKILL_MOVE", None),
+    ("action_keys", "key_skill_attack_speed", "KEY_SKILL_ATTACK_SPEED", None),
 
     # ---- [operation] 操作参数（按键时长与随机抖动） ----
     ("operation", "pydirectinput_pause", "PYDIRECTINPUT_PAUSE", None),
@@ -142,6 +133,11 @@ _SCHEMA = [
     ("operation", "potion_cooldown", "POTION_COOLDOWN", None),
     ("operation", "feed_pet_interval", "FEED_PET_INTERVAL", None),
     ("operation", "log_frame_interval", "LOG_FRAME_INTERVAL", None),
+
+    # ---- [aux_skill] 辅助技能（移动加速 / 攻击加速） ----
+    ("aux_skill", "skill_move_interval", "SKILL_MOVE_INTERVAL", None),
+    ("aux_skill", "skill_attack_speed_interval", "SKILL_ATTACK_SPEED_INTERVAL",
+     None),
 
     # ---- [hpmp] HP/MP 监控参数 ----
     ("hpmp", "hp_bar_region", "HP_BAR_REGION", _to_region),
@@ -227,31 +223,39 @@ def _apply_derived():
     global ALL_KEYS
     # 所有需要释放的按键列表（用于停止时释放全部按键，防止卡键）
     ALL_KEYS = (KEY_ATTACK, KEY_HP_POTION, KEY_MP_POTION,
-                KEY_LEFT, KEY_RIGHT, KEY_FEED_PET)
+                KEY_LEFT, KEY_RIGHT, KEY_FEED_PET,
+                KEY_SKILL_MOVE, KEY_SKILL_ATTACK_SPEED)
 
 
 # ---------------------------------------------------------------------- #
-#  资源目录解析（模板目录用，支持 exe 打包）
+#  资源目录解析（模板目录用）
 # ---------------------------------------------------------------------- #
 
 def resource_dir(name):
     """解析模板/资源目录的绝对路径。
 
-    优先使用 BASE_DIR（exe 所在目录/项目根目录）下同名目录，这样 exe
-    场景下用户可把 monster/、player/ 放在 exe 旁自由新增/覆盖模板；
-    若不存在，回退到打包进 exe 的默认资源（PyInstaller _MEIPASS）。
+    统一解析为 BASE_DIR（项目根目录）下的同名目录，这样 monster/、
+    player/ 始终是项目里可直接新增/覆盖模板的普通文件夹。
     """
-    ext = os.path.join(BASE_DIR, name)
-    if os.path.isdir(ext):
-        return ext
-    meipass = getattr(sys, "_MEIPASS", None)
-    if meipass:
-        internal = os.path.join(meipass, name)
-        if os.path.isdir(internal):
-            return internal
-    return ext
+    return os.path.join(BASE_DIR, name)
 
 
 # 模块加载时立即应用配置
 _load_config()
+
+# 新增参数的兜底默认值：老版本 config.toml 缺少这些键时使用这里的值，
+# 避免 AttributeError（用户重新生成/补充 config.toml 后即按文件中的值生效）。
+_NEW_DEFAULTS = {
+    "KEY_TOGGLE_AUX_SKILL": "f11",
+    "KEY_SKILL_MOVE": "a",
+    "KEY_SKILL_ATTACK_SPEED": "s",
+    "SKILL_MOVE_INTERVAL": 200.0,
+    "SKILL_ATTACK_SPEED_INTERVAL": 30.0,
+}
+for _name, _val in _NEW_DEFAULTS.items():
+    if _name not in globals():
+        globals()[_name] = _val
+if not isinstance(globals()["KEY_TOGGLE_AUX_SKILL"], Key):
+    KEY_TOGGLE_AUX_SKILL = _to_key(_NEW_DEFAULTS["KEY_TOGGLE_AUX_SKILL"])
+
 _apply_derived()

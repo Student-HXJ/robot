@@ -12,12 +12,14 @@ MapleStory（冒险岛）游戏自动化机器人。**纯图像识别，不读�
 robot/
 ├── config.py                 # 配置加载器（从 config.toml 读取，暴露为 config.X）
 ├── config.toml               # 用户可编辑配置（调参改这里，带中文注释）
-├── game_bot.py               # 主机器人入口（F9 启停 / F10 血蓝+喂宠 / F8 退出）
-├── calibrate_hpmp.py         # 检测框/血条/蓝条区域校准 + 存图校验工具
-├── build_exe.py              # 打包脚本（PyInstaller 生成 dist/game_bot.exe）
+├── game_bot.py               # 主机器人入口（F9 启停 / F10 血蓝+喂宠 / F11 辅助技能 / F8 退出）
+├── calibrate_detect.py       # 检测框框选校准 + 存图校验工具
+├── calibrate_hpmp.py         # HP/MP 血条框选校准 + 存图校验工具
 ├── core/                     # 核心模块，每个职责一个类一个文件
 │   ├── admin.py              # 管理员提权
 │   ├── utils.py              # 随机抖动 / 日志 / 路径
+│   ├── win_window.py         # Win32 窗口查找与置前
+│   ├── region_calib.py       # 区域框选校准公共逻辑（两个 calibrate_* 共用）
 │   ├── screencap.py          # ScreenCapture 屏幕截图
 │   ├── key_control.py        # KeyControl 按键模拟
 │   ├── template_matcher.py   # TemplateLoader 模板加载与匹配
@@ -26,7 +28,8 @@ robot/
 │   ├── monster_detector.py   # MonsterDetector 怪物检测
 │   ├── monster_tracker.py    # MonsterTracker 怪物跟踪（靠近/卡住脱困）
 │   ├── hpmp_monitor.py       # HPMPMonitor 加血加蓝
-│   └── pet_feeder.py         # PetFeeder 喂宠物
+│   ├── pet_feeder.py         # PetFeeder 喂宠物
+│   └── aux_skill.py          # AuxSkillCaster 辅助技能（移动加速/攻击加速）
 ├── monster/                  # 怪物模板（按分类分子文件夹）
 └── player/                   # 玩家模板
 ```
@@ -47,7 +50,10 @@ python game_bot.py --monster all
 # 单独运行检测（观察识别效果，F9 启停，F8 退出）
 python monster_detect.py --monster zhu
 
-# 校准检测框/血条/蓝条区域 + 存图校验（自动把坐标写入 config.toml 的 [detect] / [hpmp] 节）
+# 校准检测框（写入 config.toml 的 [detect] detect_region）
+python calibrate_detect.py
+
+# 校准 HP/MP 血条框 + 存图校验（写入 config.toml 的 [hpmp] 节）
 python calibrate_hpmp.py
 ```
 
@@ -60,9 +66,10 @@ python calibrate_hpmp.py
 | ---- | ---- |
 | `F9` | 启动 / 停止机器人 |
 | `F10` | 开启 / 关闭 HP/MP 监控 + 喂食宠物（独立于 F9） |
+| `F11` | 开启 / 关闭辅助技能：移动加速 `a`（每 200 秒）+ 攻击加速 `s`（每 30 秒）（独立于 F9/F10） |
 | `F8` | 退出程序 |
 
-游戏内操作键：攻击 `X` · 补HP `9` · 补MP `0` · 喂宠物 `8`（无跳跃键）
+游戏内操作键：攻击 `X` · 补HP `9` · 补MP `0` · 喂宠物 `8` · 辅助技能 `A`/`S`（无跳跃键）
 
 行为逻辑：
 1. 检测怪物，移动到怪物附近攻击
@@ -71,41 +78,34 @@ python calibrate_hpmp.py
 4. 无怪物 → 五分段寻路巡逻（禁区反向 + 随机移动防掉线）
 5. HP ≤ 50% 自动按 `9` 补血；MP ≤ 50% 自动按 `0` 补蓝（受 F10 控制）
 6. 每 20 分钟自动喂食宠物（受 F10 控制）
+7. 每 200 秒自动按 `A` 施放移动加速、每 30 秒自动按 `S` 施放攻击加速（受 F11 控制）
 
 ## 配置
 
 所有参数集中在 **`config.toml`**（TOML 格式，带中文注释），调整后无需改动代码：
 检测区域、模板匹配阈值、攻击距离判定、按键映射、操作延迟与抖动、
-卡住检测参数、HP/MP 血条区域与 HSV 颜色阈值、喂食间隔等。
+卡住检测参数、HP/MP 血条区域与 HSV 颜色阈值、喂食间隔、辅助技能间隔等。
 `config.py` 负责加载并把参数暴露为 `config.X`，模块无需改动。
 
-**区域坐标校准**：检测框 / 血条 / 蓝条区域坐标都通过 `python calibrate_hpmp.py`
-手动框选确定：脚本会把游戏窗口切到前台、截全屏，让你依次框选检测区域、
-HP 血条、MP 蓝条，并生成 `debug_*_mask.png` 等校验图供核对。框选完成后
-脚本会自动把坐标写回 `config.toml` 的 `[detect]` / `[hpmp]` 节，重启机器人
-后生效。游戏窗口移动/换设备/改分辨率后需重新校准。`[window] game_window_keyword`
+**辅助技能**：`[aux_skill]` 节配置移动加速/攻击加速的施放间隔
+（`skill_move_interval` 默认 200 秒、`skill_attack_speed_interval` 默认 30 秒），
+技能键在 `[action_keys]` 的 `key_skill_move`（默认 `a`）/ `key_skill_attack_speed`
+（默认 `s`），开关键在 `[control_keys]` 的 `key_toggle_aux_skill`（默认 `f11`）。
+间隔填 `0` 或负数表示禁用该技能。
+
+**区域坐标校准**：检测框与血条/蓝条区域坐标分别通过两个脚本手动框选确定，
+两个脚本都会把游戏窗口切到前台、截全屏，让你拖拽框选并生成校验图供核对，
+框选完成后自动把坐标写回 `config.toml`，重启机器人后生效：
+
+- `python calibrate_detect.py` —— 只框选**检测框**（怪物检测 + 五区巡逻共用），
+  写入 `[detect] detect_region`，校验图 `debug_detect.png` /
+  `debug_detect_overview.png`。
+- `python calibrate_hpmp.py` —— 只框选 **HP / MP 血条框**，写入 `[hpmp]` 的
+  `hp_bar_region` / `mp_bar_region`，校验图 `debug_hp_mask.png` /
+  `debug_mp_mask.png` / `debug_regions_overview.png`。
+
+游戏窗口移动/换设备/改分辨率后需重新校准。`[window] game_window_keyword`
 仅用于抓图前把游戏窗口切到前台。
-
-## 打包成 exe（跨 Windows 设备使用）
-
-```bash
-robot/Scripts/python.exe -m pip install pyinstaller   # 仅需一次
-robot/Scripts/python.exe build_exe.py
-```
-
-打包产物在 **`dist/`**，即完整发布包：
-
-```
-dist/
-├── game_bot.exe       # 单文件主程序（含 Python 运行时 + 全部依赖 + 内置模板）
-├── config.toml        # 可编辑配置
-├── monster/           # 怪物模板（可新增分类，无需重新打包）
-└── player/            # 玩家模板
-```
-
-把整个 `dist/` 文件夹拷贝到任意 Windows 设备即可使用（运行 `game_bot.exe`，
-首次会弹 UAC 自动以管理员身份运行）。程序优先使用 exe 旁边的
-`config.toml` / `monster/` / `player/`，缺失时才回退到 exe 内置资源。
 
 ## 故障排查
 

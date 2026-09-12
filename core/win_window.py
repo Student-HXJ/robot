@@ -1,7 +1,8 @@
 """Win32 窗口工具：按标题关键字查找游戏窗口并切到前台。
 
 抓图前需要把全屏游戏切到前台，避免抓到桌面/被遮挡窗口。窗口查找与激活
-逻辑集中在此，供校准工具（calibrate_hpmp）与截屏（screencap）共用，
+逻辑集中在此，供校准工具（calibrate_detect / calibrate_hpmp，经
+core/region_calib.py）与截屏（screencap）共用，
 避免多处重复 EnumWindows。
 
 所有函数 Windows-only（ctypes.windll）。
