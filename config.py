@@ -26,7 +26,6 @@ from pynput.keyboard import Key
 
 import tomllib
 
-
 # ---------------------------------------------------------------------- #
 #  路径
 # ---------------------------------------------------------------------- #
@@ -40,10 +39,10 @@ CONFIG_PATH = os.path.join(BASE_DIR, "config.toml")
 # 默认配置模板路径（缺失 config.toml 时用于自动生成一份默认配置）
 _DEFAULT_CONFIG = os.path.join(BASE_DIR, "config.default.toml")
 
-
 # ---------------------------------------------------------------------- #
 #  类型转换
 # ---------------------------------------------------------------------- #
+
 
 def _to_region(v):
     """屏幕区域 (left, top, width, height) 转为 4 元组。"""
@@ -80,8 +79,7 @@ _SCHEMA = [
     ("detect", "detect_side_margin", "DETECT_SIDE_MARGIN", None),
     ("detect", "player_detect_x_shrink", "PLAYER_DETECT_X_SHRINK", None),
     ("detect", "player_cache_ttl", "PLAYER_CACHE_TTL", None),
-    ("detect", "keep_centered_middle_fraction", "KEEP_CENTERED_MIDDLE_FRACTION",
-     None),
+    ("detect", "keep_centered_middle_fraction", "KEEP_CENTERED_MIDDLE_FRACTION", None),
 
     # ---- [match] 模板匹配 ----
     ("match", "match_threshold", "MATCH_THRESHOLD", None),
@@ -92,13 +90,11 @@ _SCHEMA = [
 
     # ---- [monster_filter] 怪物过滤 ----
     ("monster_filter", "monster_min_area", "MONSTER_MIN_AREA", None),
-    ("monster_filter", "monster_confirm_score", "MONSTER_CONFIRM_SCORE",
-     None),
+    ("monster_filter", "monster_confirm_score", "MONSTER_CONFIRM_SCORE", None),
 
     # ---- [attack] 攻击距离判定 ----
     ("attack", "attack_radius", "ATTACK_RADIUS", None),
-    ("attack", "attack_distance_threshold", "ATTACK_DISTANCE_THRESHOLD",
-     None),
+    ("attack", "attack_distance_threshold", "ATTACK_DISTANCE_THRESHOLD", None),
     ("attack", "attack_center_offset", "ATTACK_CENTER_OFFSET", None),
     ("attack", "attack_turn_delay", "ATTACK_TURN_DELAY", None),
 
@@ -126,8 +122,7 @@ _SCHEMA = [
     ("operation", "dir_hold_jitter", "DIR_HOLD_JITTER", None),
     ("operation", "attack_interval", "ATTACK_INTERVAL", None),
     ("operation", "attack_jitter", "ATTACK_JITTER", None),
-    ("operation", "move_stuck_check_interval", "MOVE_STUCK_CHECK_INTERVAL",
-     None),
+    ("operation", "move_stuck_check_interval", "MOVE_STUCK_CHECK_INTERVAL", None),
     ("operation", "move_stuck_threshold", "MOVE_STUCK_THRESHOLD", None),
     ("operation", "stuck_reverse_hold_time", "STUCK_REVERSE_HOLD_TIME", None),
     ("operation", "potion_cooldown", "POTION_COOLDOWN", None),
@@ -136,8 +131,7 @@ _SCHEMA = [
 
     # ---- [aux_skill] 辅助技能（移动加速 / 攻击加速） ----
     ("aux_skill", "skill_move_interval", "SKILL_MOVE_INTERVAL", None),
-    ("aux_skill", "skill_attack_speed_interval", "SKILL_ATTACK_SPEED_INTERVAL",
-     None),
+    ("aux_skill", "skill_attack_speed_interval", "SKILL_ATTACK_SPEED_INTERVAL", None),
 
     # ---- [hpmp] HP/MP 监控参数 ----
     ("hpmp", "hp_bar_region", "HP_BAR_REGION", _to_region),
@@ -157,10 +151,10 @@ _SCHEMA = [
     ("window", "game_window_keyword", "GAME_WINDOW_KEYWORD", None),
 ]
 
-
 # ---------------------------------------------------------------------- #
 #  加载逻辑
 # ---------------------------------------------------------------------- #
+
 
 def _read_toml(path):
     """读取 TOML 文件，返回 dict。"""
@@ -214,22 +208,29 @@ def _load_config():
         _apply(data)
         return
 
-    raise RuntimeError(
-        f"找不到任何配置（{CONFIG_PATH} 与默认模板均缺失），程序无法启动")
+    raise RuntimeError(f"找不到任何配置（{CONFIG_PATH} 与默认模板均缺失），程序无法启动")
 
 
 def _apply_derived():
     """计算派生常量（基于已加载的配置值）。"""
     global ALL_KEYS
     # 所有需要释放的按键列表（用于停止时释放全部按键，防止卡键）
-    ALL_KEYS = (KEY_ATTACK, KEY_HP_POTION, KEY_MP_POTION,
-                KEY_LEFT, KEY_RIGHT, KEY_FEED_PET,
-                KEY_SKILL_MOVE, KEY_SKILL_ATTACK_SPEED)
+    ALL_KEYS = (
+        KEY_ATTACK,
+        KEY_HP_POTION,
+        KEY_MP_POTION,
+        KEY_LEFT,
+        KEY_RIGHT,
+        KEY_FEED_PET,
+        KEY_SKILL_MOVE,
+        KEY_SKILL_ATTACK_SPEED,
+    )
 
 
 # ---------------------------------------------------------------------- #
 #  资源目录解析（模板目录用）
 # ---------------------------------------------------------------------- #
+
 
 def resource_dir(name):
     """解析模板/资源目录的绝对路径。
