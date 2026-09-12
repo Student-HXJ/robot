@@ -6,7 +6,7 @@
 - non_max_suppression：非极大抑制，合并距离过近的命中
 - 怪物分类选择：list_monster_categories / select_monster_category
 
-模板目录基于 config.resource_dir() 解析（exe 场景优先 exe 目录、回退打包资源），
+模板目录基于 config.resource_dir() 解析（项目根目录下的 monster/、player/），
 文件可安全放在子包 core/ 中。
 """
 

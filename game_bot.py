@@ -2,16 +2,18 @@
 智能游戏机器人（主决策循环 + 命令行入口）。
 
 组装各核心模块：ScreenCapture / KeyControl / MonsterDetector /
-MonsterTracker / HPMPMonitor / PetFeeder，由单一决策循环驱动：
+MonsterTracker / HPMPMonitor / PetFeeder / AuxSkillCaster，由单一决策循环驱动：
 1. 检测怪物：有怪物时攻击/追怪优先于五分段寻路
 2. 怪物在攻击距离内 → 转身面向怪物方向攻击（绝不朝反方向攻击）
 3. 怪物在攻击距离外 → 移动靠近（持续按住方向键）
 4. 无怪物 → 五分段寻路（禁区判定 + 沿持久方向巡逻）
 5. HP <= 阈值按键 9 补血，MP <= 阈值按键 0 补蓝
 6. 每 FEED_PET_INTERVAL 自动喂食宠物
+7. 每 SKILL_MOVE_INTERVAL / SKILL_ATTACK_SPEED_INTERVAL 自动施放辅助技能
 
 按键说明：
   F9 启动/停止机器人；F10 开启/关闭 HP/MP 监控 + 喂食宠物；
+  F11 开启/关闭辅助技能（移动加速 a / 攻击加速 s）；
   F8 退出。攻击 X | 补HP 9 | 补MP 0 | 喂宠物 8。
 """
 
@@ -25,6 +27,7 @@ from pynput.keyboard import Listener
 import config
 from core import utils
 from core.admin import ensure_admin
+from core.aux_skill import AuxSkillCaster
 from core.hpmp_monitor import HPMPMonitor
 from core.key_control import KeyControl
 from core.monster_detector import MonsterDetector
@@ -63,6 +66,10 @@ class GameBot:
 
         # 喂食宠物（同受 F10 控制，与 HP/MP 一起开关）
         self.feeder = PetFeeder(self.keys, log=self.log)
+
+        # 辅助技能（F11 开关，默认关闭，与机器人启停完全独立）
+        self.aux_skill_enabled = False
+        self.aux_skill = AuxSkillCaster(self.keys, log=self.log)
 
         # 怪物检测器（怪物分类已在程序启动时确定，此处加载模板）
         self.detector = MonsterDetector(monster_dir=config.MONSTER_DIR, load_monsters=False, screencap=self._cap)
@@ -115,8 +122,9 @@ class GameBot:
     def toggle_hp_mp(self):
         """切换 HP/MP 监控 + 喂食宠物开关（F10 统一控制）。
 
-        血条/蓝条/检测框坐标统一由 calibrate_hpmp.py 校准并写入 config.toml，
-        此处不再做运行时自动校准，直接按配置坐标启动监控线程。
+        血条/蓝条坐标由 calibrate_hpmp.py 校准、检测框坐标由 calibrate_detect.py
+        校准并写入 config.toml，此处不再做运行时自动校准，直接按配置坐标启动
+        监控线程。
         """
         self.hp_mp_enabled = not self.hp_mp_enabled
         if self.hp_mp_enabled:
@@ -127,6 +135,24 @@ class GameBot:
             self.feeder.stop()
         status = "开启" if self.hp_mp_enabled else "关闭"
         self.log.info(f"HP/MP 监控 + 喂食宠物: {status}")
+
+    # ------------------------------------------------------------------ #
+    #  辅助技能（F11，与机器人启停、HP/MP 监控独立）
+    # ------------------------------------------------------------------ #
+
+    def toggle_aux_skill(self):
+        """切换辅助技能开关（F11 统一控制移动加速 + 攻击加速）。
+
+        开启后由 AuxSkillCaster 独立线程按 config.toml [aux_skill] 配置的
+        间隔定时按键（默认移动加速 a / 200 秒，攻击加速 s / 30 秒）。
+        """
+        self.aux_skill_enabled = not self.aux_skill_enabled
+        if self.aux_skill_enabled:
+            self.aux_skill.start()
+        else:
+            self.aux_skill.stop()
+        status = "开启" if self.aux_skill_enabled else "关闭"
+        self.log.info(f"辅助技能（移动加速 + 攻击加速）: {status}")
 
     # ------------------------------------------------------------------ #
     #  怪物检测
@@ -238,6 +264,7 @@ class GameBot:
         """释放资源。"""
         self.hpmp.stop()
         self.feeder.stop()
+        self.aux_skill.stop()
         self.detector.close()  # 共享截屏实例，此处不释放
         self._cap.close()
 
@@ -271,6 +298,8 @@ def main():
             threading.Thread(target=bot.toggle, daemon=True).start()
         elif key == config.KEY_TOGGLE_HPMP:
             threading.Thread(target=bot.toggle_hp_mp, daemon=True).start()
+        elif key == config.KEY_TOGGLE_AUX_SKILL:
+            threading.Thread(target=bot.toggle_aux_skill, daemon=True).start()
         elif key == config.KEY_QUIT:
             print("[INFO] Q 按下，退出程序")
             bot.stop()
@@ -281,6 +310,7 @@ def main():
     print("=" * 60)
     print("  - 按 [F9] 启动/停止机器人")
     print("  - 按 [F10] 开启/关闭 HP/MP 监控 + 喂食宠物（独立开关）")
+    print("  - 按 [F11] 开启/关闭辅助技能（独立开关）")
     print("  - 按 [F8] 退出程序")
     print(f"  - 攻击: {config.KEY_ATTACK.upper()}")
     print(f"  - 补HP: {config.KEY_HP_POTION} "
@@ -289,6 +319,10 @@ def main():
           f"(MP<={config.MP_THRESHOLD}%)")
     print(f"  - 喂食宠物: {config.KEY_FEED_PET} "
           f"(每 {config.FEED_PET_INTERVAL / 60:.0f} 分钟自动按一次)")
+    print(f"  - 辅助技能: 移动加速 {config.KEY_SKILL_MOVE} "
+          f"(每 {config.SKILL_MOVE_INTERVAL:.0f} 秒) | 攻击加速 "
+          f"{config.KEY_SKILL_ATTACK_SPEED} "
+          f"(每 {config.SKILL_ATTACK_SPEED_INTERVAL:.0f} 秒)")
     print("  - 移动: 方向键")
     print(f"  - 怪物检测: core/monster_detector.py")
     print(f"  - 怪物分类: {monster_dir}（启动时已确定，F9 不再询问）")

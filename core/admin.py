@@ -20,14 +20,8 @@ def ensure_admin():
         os.chdir(os.path.dirname(os.path.abspath(sys.argv[0])))
         return
     script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-    # 打包为 exe 时：sys.executable 即 exe 本体，ShellExecute 的 lpParameters
-    # 只需传真正的参数（sys.argv[1:]），不能再带上 exe 路径，否则子进程
-    # 命令行会多出重复的 exe 路径，导致 argparse 报"unrecognized arguments"。
-    # 脚本方式运行时：python.exe 需要把脚本路径作为第一个参数。
-    if getattr(sys, "frozen", False):
-        params = " ".join(f'"{a}"' for a in sys.argv[1:])
-    else:
-        params = " ".join(f'"{a}"' for a in sys.argv)
+    # 以 python.exe 重新启动自身：脚本路径必须作为第一个参数传给解释器。
+    params = " ".join(f'"{a}"' for a in sys.argv)
     ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params,
                                         script_dir, 1)
     sys.exit(0)
