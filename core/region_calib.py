@@ -12,6 +12,8 @@ config.toml），差别只在「要框哪几个区域」以及「存图校验方
 本模块不含任何按键/机器人逻辑，可被任意校准脚本复用。
 """
 
+import ctypes
+import ctypes.wintypes
 import re
 import time
 
@@ -96,12 +98,151 @@ def save_fullscreen(full_img):
     return path
 
 
+def _bring_window_to_front(fig, title="框选窗口"):
+    """把 matplotlib 框选窗口置顶并抢到前台焦点。
+
+    游戏是全屏窗口，会一直盖在桌面上，导致 matplotlib 窗口虽然显示了、却完全
+    被遮挡：鼠标按下/拖拽/抬起事件根本到不了框选窗口，表现就是「窗口在，但
+    拖不出框」。实测 Tk 的 ``wm_attributes("-topmost", 1)`` 在本机（Windows）
+    不生效（EXSTYLE 的 WS_EX_TOPMOST 位没置上），必须用 Win32 的
+    ``SetWindowPos(HWND_TOPMOST)`` 才能真正置顶。
+
+    Tk 的窗口标题就是 "Figure N"；优先用 Tk 自己的窗口 id 反查 Win32 句柄，
+    取不到时再按标题兜底。
+
+    Args:
+        fig: matplotlib Figure
+        title: 仅用于日志的描述
+    """
+    # 1) Tk 层：尽量抢焦点（部分情况下可用）
+    try:
+        win = fig.canvas.manager.window
+        win.attributes("-topmost", True)
+        win.lift()
+        win.focus_force()
+        win.update_idletasks()
+    except Exception:
+        pass  # Tk 不可用时继续走 Win32 方案
+
+    # 2) Win32 层：真正置顶（Tk 的 topmost 在 Windows 上常常无效）
+
+    def _apply_topmost():
+        """真正执行置顶（此时窗口已创建/已映射）。"""
+        try:
+            user32 = ctypes.windll.user32
+        except Exception as e:
+            print(f"[WARN] 无法加载 Win32 接口（{e}），"
+                  "如窗口被游戏挡住请先最小化游戏")
+            return
+        hwnd = _figure_hwnd(fig, user32)
+        if not hwnd:
+            print(f"[WARN] 未找到{title}句柄，如拖不出框请先最小化游戏窗口")
+            return
+
+        # 必须声明 argtypes：否则 64 位 HWND 会被 ctypes 截断成 32 位，
+        # SetWindowPos 直接返回 0（置顶失败）。
+        user32.SetWindowPos.argtypes = [ctypes.wintypes.HWND,
+                                        ctypes.wintypes.HWND,
+                                        ctypes.c_int, ctypes.c_int,
+                                        ctypes.c_int, ctypes.c_int,
+                                        ctypes.c_uint]
+        user32.SetWindowPos.restype = ctypes.wintypes.BOOL
+        user32.SetForegroundWindow.argtypes = [ctypes.wintypes.HWND]
+        user32.SetForegroundWindow.restype = ctypes.wintypes.BOOL
+
+        HWND_TOPMOST = -1
+        SWP_NOSIZE, SWP_NOMOVE, SWP_SHOWWINDOW = 0x0001, 0x0002, 0x0040
+        ok = user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                                 SWP_NOSIZE | SWP_NOMOVE | SWP_SHOWWINDOW)
+        shown = bool(user32.SetForegroundWindow(hwnd))
+        if ok:
+            print("[INFO] 已把框选窗口置顶：请在窗口内按住鼠标左键拖拽框选，"
+                  "然后按 Enter 或直接关闭窗口确认")
+        else:
+            print("[WARN] 框选窗口置顶失败，如拖不出框请先最小化游戏窗口")
+        if not shown:
+            # 抢焦点失败不影响使用（置顶后鼠标事件仍能到达），仅提示
+            print("[INFO] 若窗口未获得焦点，请先用鼠标点一下框选窗口再拖拽")
+
+    # plt.show() 之前窗口还没创建（EnumWindows 找不到），show() 之后又会被
+    # 阻塞，所以用 Tk 的 after(0) 把置顶排进事件循环：show() 一进入循环就执行。
+    scheduled = False
+    try:
+        fig.canvas.manager.window.after(0, _apply_topmost)
+        scheduled = True
+    except Exception:
+        pass
+    if not scheduled:
+        # 兜底：非 Tk 后端时先让窗口完成创建再置顶
+        try:
+            import matplotlib.pyplot as plt  # 延迟导入：无 GUI 环境也能跑
+            plt.pause(0.1)
+        except Exception:
+            pass
+        _apply_topmost()
+
+
+def _figure_hwnd(fig, user32):
+    """取 matplotlib/Tk 图形窗口的 Win32 顶层句柄。
+
+    优先用 Tk 自己的窗口 id（``winfo_id``）再取父窗口：Tk 的 toplevel 在
+    Windows 上会包一层 wrapper，真正带标题栏、需要置顶的是它的父窗口。取不到
+    时退回「按标题 Figure 枚举」的方式。
+
+    Args:
+        fig: matplotlib Figure
+        user32: ctypes 的 user32
+
+    Returns:
+        int | None: 窗口句柄；找不到返回 None
+    """
+    try:
+        child = fig.canvas.manager.window.winfo_id()
+        user32.GetParent.argtypes = [ctypes.wintypes.HWND]
+        user32.GetParent.restype = ctypes.wintypes.HWND
+        parent = user32.GetParent(child)
+        if parent:
+            return parent
+        return child
+    except Exception:
+        return _find_tk_window_hwnd(user32)
+
+
+def _find_tk_window_hwnd(user32):
+    """按标题 "Figure " 反查最近创建的 Tk（matplotlib）窗口句柄。
+
+    Returns:
+        int | None: 窗口句柄；找不到返回 None
+    """
+    found = []
+
+    @ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.HWND,
+                        ctypes.wintypes.LPARAM)
+    def _cb(hwnd, lparam):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length <= 0:
+            return True
+        buf = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buf, length + 1)
+        if buf.value.startswith("Figure"):
+            found.append(hwnd)
+        return True
+
+    user32.EnumWindows(_cb, 0)
+    return found[-1] if found else None
+
+
 # ---------------------------------------------------------------------- #
 #  框选
 # ---------------------------------------------------------------------- #
 
 def try_gui_select(full_img, keys):
     """尝试用 matplotlib 交互框选；成功返回 {key: region}，失败返回 None。
+
+    框选方式与拆分前的 calibrate_hpmp.py 完全一致：matplotlib 窗口显示全屏图，
+    用 RectangleSelector 鼠标拖拽框选，按 Enter（或关窗）确认。
 
     Args:
         full_img: 全屏 BGR 图
@@ -140,20 +281,23 @@ def try_gui_select(full_img, keys):
             rect["region"] = (left, top, w, h)
             print(f"  {label} 区域: left={left} top={top} w={w} h={h}")
 
-        RectangleSelector(ax,
-                          on_select,
-                          useblit=True,
-                          button=[1],
-                          minspanx=MIN_REGION_SIZE,
-                          minspany=MIN_REGION_SIZE,
-                          spancoords="pixels",
-                          interactive=True)
+        rs = RectangleSelector(ax,
+                               on_select,
+                               useblit=True,
+                               button=[1],
+                               minspanx=MIN_REGION_SIZE,
+                               minspany=MIN_REGION_SIZE,
+                               spancoords="pixels",
+                               interactive=True)
 
         def on_key(event):
             if event.key == "enter":
                 plt.close(fig)
 
         fig.canvas.mpl_connect("key_press_event", on_key)
+        # 唯一的额外处理：把框选窗口置顶。游戏是全屏窗口会盖住桌面，窗口被遮挡
+        # 时拖拽事件到不了框选窗口（现象就是「窗口在，但拖不出框」）。
+        _bring_window_to_front(fig)
         plt.show()
 
         if "region" not in rect:
