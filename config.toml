@@ -30,13 +30,13 @@ player_dir = "player"
 # 它同时是怪物监控紫框范围（固定覆盖整个检测区域，不随玩家移动）。
 # 格式 [left, top, width, height]，取屏幕中心玩家附近的区域。
 # 注：按「游戏窗口全屏 (0,0) 尺寸 2560x1600」玩家居中实测调整（估算，可再微调）。
-detect_region = [1185, 431, 1375, 87]
+detect_region = [7, 778, 2553, 179]
 
 # 检测间隔（秒），0.01 ≈ 100fps
 detect_interval = 0.01
 
 # 玩家检测区域左右两边各保留的边距像素，避免贴边误匹配
-player_detect_x_shrink = 20
+player_detect_x_shrink = 60
 
 # 玩家位置缓存有效期（秒）：玩家检测偶尔会失败（移动动画帧不匹配模板等），
 # 失败时回退到上次成功检测到的位置，而非检测区域中心，避免朝向/距离判断错乱。
@@ -99,11 +99,11 @@ monster_confirm_score = 0.5
 # 检测区域，不再据此动态移动）。野猪（yezhu）身体高约 82px 且中心比玩家低
 # 约 20px。
 # 注意：该值不影响攻击距离判定（那是 attack_distance_threshold）。
-attack_radius = 80
+attack_radius = 500
 
 # 攻击触发距离（像素）：玩家中心与怪物中心 X 距离 ≤ 此值即发动攻击。
 # 原默认 100px；调大至 120px 以在怪物贴近玩家时更早、更稳定地触发攻击。
-attack_distance_threshold = 120
+attack_distance_threshold =500
 
 # 朝怪物移动时的朝向判定死区（右偏容差，像素）：怪物中心在玩家 X 右侧该值
 # 以内时不切换朝向，避免玩家与怪物大致对齐时左右抖动。
@@ -166,21 +166,21 @@ attack_interval = 0.01
 attack_jitter = 0.01
 
 # 捡东西连按次数
-pickup_count = 3
+pickup_count = 5
 # 无怪物时捡东西的间隔（秒）
-pickup_interval = 2.0
+pickup_interval = 1
 # F10 自动捡东西的间隔（秒）：开 F10 后每隔该间隔三连按 Z 捡一次东西
 # （与 F9 机器人启停独立，默认 1 秒；移动中自动跳过，防止打断方向移动）
-auto_pickup_interval = 0.03
+auto_pickup_interval = 3
 
 # 卡住检测：每隔该时长检查一次玩家位移，低于阈值视为撞墙/被阻挡
-move_stuck_check_interval = 2.0
+move_stuck_check_interval = 1
 # 卡住判定阈值（像素）：玩家往一个方向移动时，检查周期内坐标变化小于
 # 此值（默认 10px）则判定被阻挡，立即往相反方向移动
-move_stuck_threshold = 10
+move_stuck_threshold = 30
 # 反向脱困后保持反方向的时长（秒），期间不被他处逻辑覆盖方向，
 # 避免刚反向又被"朝怪物方向"逻辑立刻拉回墙边
-stuck_reverse_hold_time = 2.0
+stuck_reverse_hold_time = 3.0
 
 # 补药冷却时间（秒），防止连续按
 potion_cooldown = 2.0
@@ -188,7 +188,7 @@ potion_cooldown = 2.0
 feed_pet_interval = 1200.0
 
 # 日志降频帧数：每 N 帧打印一次概况类日志
-log_frame_interval = 60
+log_frame_interval = 120
 
 # ------------------------------------------------------------------ #
 #  [hpmp] HP/MP 监控参数
@@ -199,8 +199,8 @@ log_frame_interval = 60
 # 血条区域（屏幕绝对坐标，需用 calibrate_hpmp.py 校准）
 # 格式 [left, top, width, height]。机器/分辨率相关，游戏窗口移动/换设备后请重新校准。
 # 注：以下坐标按「游戏窗口全屏 (0,0) 尺寸 2560x1600」实测标定。
-hp_bar_region = [1690, 796, 107, 16]   # HP 血条（红填充，实测读 98%）
-mp_bar_region = [1797, 796, 108, 16]   # MP 血条（蓝填充，实测读 98%）
+hp_bar_region = [871, 1477, 314, 36]   # HP 血条（红填充，实测读 98%）
+mp_bar_region = [1186, 1477, 314, 36]   # MP 血条（蓝填充，实测读 98%）
 
 # 血条颜色范围（HSV）
 hp_color_lower = [0, 80, 80]          # HP 红色下界（色相 0-10）

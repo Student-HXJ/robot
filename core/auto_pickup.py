@@ -63,12 +63,6 @@ class AutoPickup:
         while not self._stop_event.is_set():
             now = time.time()
             if now - last_pickup >= config.AUTO_PICKUP_INTERVAL:
-                if not self._is_busy():
-                    self.log.info(f"自动捡东西：连按 {config.KEY_PICKUP.upper()} "
-                                  f"{config.PICKUP_COUNT} 次 (间隔 "
-                                  f"{config.AUTO_PICKUP_INTERVAL:.0f} 秒)")
-                    self._keys.pickup()
-                else:
-                    self.log.info("有操作进行中，跳过本次自动捡东西")
+                self._keys.pickup()
                 last_pickup = now
             time.sleep(0.5)
