@@ -44,7 +44,7 @@ class KeyControl:
         """按下→随机保持→释放。
 
         Args:
-            key_name: pydirectinput 键名，如 'ctrl'、'z'、'9'
+            key_name: pydirectinput 键名，如 'ctrl'、'9'
         """
         try:
             pydirectinput.keyDown(key_name)
@@ -56,11 +56,6 @@ class KeyControl:
     def attack(self):
         """攻击。"""
         self.key_press(config.KEY_ATTACK)
-
-    def pickup(self):
-        """捡东西（Z 连按 PICKUP_COUNT 次）。"""
-        for _ in range(config.PICKUP_COUNT):
-            self.key_press(config.KEY_PICKUP)
 
     # ------------------------------------------------------------------ #
     #  带朝向的攻击

@@ -99,11 +99,11 @@ monster_confirm_score = 0.5
 # 检测区域，不再据此动态移动）。野猪（yezhu）身体高约 82px 且中心比玩家低
 # 约 20px。
 # 注意：该值不影响攻击距离判定（那是 attack_distance_threshold）。
-attack_radius = 80
+attack_radius = 100
 
 # 攻击触发距离（像素）：玩家中心与怪物中心 X 距离 ≤ 此值即发动攻击。
 # 原默认 100px；调大至 120px 以在怪物贴近玩家时更早、更稳定地触发攻击。
-attack_distance_threshold = 120
+attack_distance_threshold = 140
 
 # 朝怪物移动时的朝向判定死区（右偏容差，像素）：怪物中心在玩家 X 右侧该值
 # 以内时不切换朝向，避免玩家与怪物大致对齐时左右抖动。
@@ -137,7 +137,6 @@ key_quit = "f8"
 [action_keys]
 
 key_attack = "x"      # 攻击键
-key_pickup = "z"      # 捡东西键
 key_feed_pet = "8"    # 喂食宠物快捷键
 key_hp_potion = "9"   # 补血药水快捷键
 key_mp_potion = "0"   # 补蓝药水快捷键
@@ -164,14 +163,6 @@ dir_hold_jitter = 0.1
 # 攻击间隔（秒）与其抖动（±秒）【预留参数，暂未使用】
 attack_interval = 0.01
 attack_jitter = 0.01
-
-# 捡东西连按次数
-pickup_count = 3
-# 无怪物时捡东西的间隔（秒）
-pickup_interval = 2.0
-# F10 自动捡东西的间隔（秒）：开 F10 后每隔该间隔三连按 Z 捡一次东西
-# （与 F9 机器人启停独立，默认 1 秒；移动中自动跳过，防止打断方向移动）
-auto_pickup_interval = 0.03
 
 # 卡住检测：每隔该时长检查一次玩家位移，低于阈值视为撞墙/被阻挡
 move_stuck_check_interval = 2.0
@@ -212,7 +203,7 @@ mp_color_upper = [130, 255, 255]
 
 # HP/MP 百分比阈值（%），低于此值补药
 hp_threshold = 50.0
-mp_threshold = 50.0
+mp_threshold = 20.0
 
 # HP/MP 检查间隔（秒）
 hp_mp_check_interval = 1.0

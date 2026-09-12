@@ -121,7 +121,6 @@ _SCHEMA = [
 
     # ---- [action_keys] 操作键名（传给 pydirectinput） ----
     ("action_keys", "key_attack", "KEY_ATTACK", None),
-    ("action_keys", "key_pickup", "KEY_PICKUP", None),
     ("action_keys", "key_feed_pet", "KEY_FEED_PET", None),
     ("action_keys", "key_hp_potion", "KEY_HP_POTION", None),
     ("action_keys", "key_mp_potion", "KEY_MP_POTION", None),
@@ -136,9 +135,6 @@ _SCHEMA = [
     ("operation", "dir_hold_jitter", "DIR_HOLD_JITTER", None),
     ("operation", "attack_interval", "ATTACK_INTERVAL", None),
     ("operation", "attack_jitter", "ATTACK_JITTER", None),
-    ("operation", "pickup_count", "PICKUP_COUNT", None),
-    ("operation", "pickup_interval", "PICKUP_INTERVAL", None),
-    ("operation", "auto_pickup_interval", "AUTO_PICKUP_INTERVAL", None),
     ("operation", "move_stuck_check_interval", "MOVE_STUCK_CHECK_INTERVAL",
      None),
     ("operation", "move_stuck_threshold", "MOVE_STUCK_THRESHOLD", None),
@@ -230,7 +226,7 @@ def _apply_derived():
     """计算派生常量（基于已加载的配置值）。"""
     global ALL_KEYS
     # 所有需要释放的按键列表（用于停止时释放全部按键，防止卡键）
-    ALL_KEYS = (KEY_ATTACK, KEY_PICKUP, KEY_HP_POTION, KEY_MP_POTION,
+    ALL_KEYS = (KEY_ATTACK, KEY_HP_POTION, KEY_MP_POTION,
                 KEY_LEFT, KEY_RIGHT, KEY_FEED_PET)
 
 
