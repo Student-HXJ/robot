@@ -4,7 +4,7 @@
 组装 PlayerDetector / AttackDistance / TemplateLoader / ScreenCapture，
 对外提供一次完整检测 ``detect_once()``，内部完成：
 1. 按配置检测区域截取游戏画面（固定区域，不做动态调整）
-2. 玩家位置检测（委托 PlayerDetector）
+2. 玩家位置检测（委托 PlayerDetector，按职业加载 player/<职业>/ 模板）
 3. 紫框范围内怪物检测（模板匹配 + 多尺度 + 镜像）
 4. 面积/置信度过滤 + 攻击距离判定（委托 attack_distance）
 5. 怪物按距离升序排列
@@ -31,7 +31,8 @@ import config
 from core import attack_distance
 from core.player_detector import PlayerDetector
 from core.screencap import ScreenCapture
-from core.template_matcher import (TemplateLoader, match_templates, non_max_suppression, select_monster_category)
+from core.template_matcher import (TemplateLoader, match_templates, non_max_suppression,
+                                   select_monster_category, select_player_category)
 
 
 class MonsterDetector:
@@ -41,11 +42,14 @@ class MonsterDetector:
     判断怪物是否进入玩家攻击范围（X 距离判定）。
     """
 
-    def __init__(self, monster_dir=None, load_monsters=True, screencap=None):
+    def __init__(self, monster_dir=None, player_dir=None, load_monsters=True, screencap=None):
         """
         Args:
             monster_dir: 怪物模板目录（相对项目根目录），例如 "monster/zhu"。
                          为 None 时使用整个 monster/ 目录（递归加载所有分类）。
+            player_dir: 玩家模板目录（相对项目根目录），例如 "player/binglei"
+                        （player/ 下的职业子目录）。为 None 时使用整个 player/
+                        目录（递归加载所有职业）。
             load_monsters: 是否在构造时就加载怪物模板。传 False 可延迟到
                            实际启动前再调用 set_monster_dir() 选择分类加载。
             screencap: 复用的 ScreenCapture 实例；为 None 时内部自建并拥有
@@ -84,8 +88,8 @@ class MonsterDetector:
         if load_monsters:
             self.set_monster_dir(self.monster_dir)
 
-        # 玩家检测器（加载玩家模板，含镜像）
-        self._player_detector = PlayerDetector(self._detect_region[2], self._detect_region[3])
+        # 玩家检测器（按职业加载玩家模板，含镜像）
+        self._player_detector = PlayerDetector(self._detect_region[2], self._detect_region[3], player_dir=player_dir)
 
         # 最近一次检测的玩家框（供 GameBot 读取玩家中心/位置）
         self._player_box = None  # (x, y, w, h, cx, cy)
@@ -110,6 +114,11 @@ class MonsterDetector:
         return self._detect_region
 
     @property
+    def player_dir(self):
+        """当前玩家模板目录（player/ 下的职业子目录）。"""
+        return self._player_detector.player_dir
+
+    @property
     def player_templates(self):
         """玩家模板列表（调试/统计用）。"""
         return self._player_detector.templates
@@ -125,7 +134,7 @@ class MonsterDetector:
         return pb[4] if pb else self._player_pos[0]
 
     # ------------------------------------------------------------------ #
-    #  模板目录
+    #  模板目录（怪物分类 / 玩家职业）
     # ------------------------------------------------------------------ #
 
     def set_monster_dir(self, monster_dir):
@@ -149,6 +158,18 @@ class MonsterDetector:
                   f"{self.monster_dir}/ 目录")
 
         return len(self.templates)
+
+    def set_player_dir(self, player_dir):
+        """切换玩家职业并重新加载模板（可在运行前随时调用）。
+
+        Args:
+            player_dir: 玩家模板目录（相对项目根目录），如 "player/binglei"；
+                        传 config.PLAYER_DIR 时递归加载所有职业。
+
+        Returns:
+            加载到的模板数量
+        """
+        return self._player_detector.set_player_dir(player_dir)
 
     def _calc_detect_region(self):
         """计算检测区域（左右各向内收缩 DETECT_SIDE_MARGIN 像素）。"""
@@ -354,6 +375,7 @@ class MonsterDetector:
         print(f"[校准] 紫框=监控范围（固定=整个检测区域）, 红十字=玩家, 绿框=检测区域")
         print(f"[校准] 怪物模板目录: {self.monster_dir}")
         print(f"[校准] 怪物模板数: {len(self.templates)}")
+        print(f"[校准] 玩家模板目录: {self.player_dir}")
         print(f"[校准] 玩家模板数: {len(self.player_templates)}")
 
     def close(self):
@@ -368,7 +390,8 @@ class MonsterDetector:
 
 
 def main():
-    """独立检测 CLI：--monster 选择分类，--calibrate 校准，F9 启停，F8 退出。"""
+    """独立检测 CLI：--monster 选择怪物分类，--player 选择玩家职业，
+    --calibrate 校准，F9 启停，F8 退出。"""
     from core.admin import ensure_admin
     ensure_admin()
 
@@ -377,14 +400,20 @@ def main():
     parser.add_argument("--calibrate", action="store_true", help="校准模式")
     parser.add_argument("--monster", default=None, help="怪物分类名（monster/ 下的子文件夹名），"
                         "如 zhu；传 all 表示全部；不传则启动时交互选择")
+    parser.add_argument("--player", default=None, help="玩家职业名（player/ 下的子文件夹名），"
+                        "如 binglei；传 all 表示全部；不传则启动时交互选择")
     args = parser.parse_args()
 
-    # 启动时先选择要检测的怪物分类
+    # 启动时先选择要检测的怪物分类与玩家职业
     monster_dir = select_monster_category(args.monster)
     if monster_dir is None:
         print("[INFO] 已取消，程序退出")
         return
-    detector = MonsterDetector(monster_dir=monster_dir)
+    player_dir = select_player_category(args.player)
+    if player_dir is None:
+        print("[INFO] 已取消，程序退出")
+        return
+    detector = MonsterDetector(monster_dir=monster_dir, player_dir=player_dir)
     if args.calibrate:
         detector.calibrate()
         detector.close()
@@ -408,6 +437,7 @@ def main():
     print(f"  - 检测区域: {detector.detect_region}")
     print(f"  - 怪物分类: {detector.monster_dir}")
     print(f"  - 怪物模板数: {len(detector.templates)}")
+    print(f"  - 玩家职业: {detector.player_dir}")
     print(f"  - 玩家模板数: {len(detector.player_templates)}")
     print(f"  - 攻击半径: {config.ATTACK_RADIUS}px")
     print("=" * 60)

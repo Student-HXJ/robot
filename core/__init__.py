@@ -7,7 +7,8 @@ core 包：冒险岛机器人核心功能模块。
 - screencap      屏幕截图（ScreenCapture）
 - key_control    按键模拟（KeyControl）
 - template_matcher 模板加载与匹配（TemplateLoader / match_templates / NMS / 分类选择）
-- player_detector  玩家检测（PlayerDetector）
+                  分类选择对 monster/（怪物分类）与 player/（玩家职业）通用
+- player_detector  玩家检测（PlayerDetector，按职业加载 player/<职业>/ 模板）
 - attack_distance  攻击距离计算（distance / in_range 纯函数）
 - monster_detector 怪物检测（MonsterDetector）
 - monster_tracker  怪物跟踪（MonsterTracker）

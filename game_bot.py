@@ -15,6 +15,11 @@ MonsterTracker / HPMPMonitor / PetFeeder / AuxSkillCaster，由单一决策循�
   F9 启动/停止机器人；F10 开启/关闭 HP/MP 监控 + 喂食宠物；
   F11 开启/关闭辅助技能（移动加速 a / 攻击加速 s）；
   F8 退出。攻击 X | 补HP 9 | 补MP 0 | 喂宠物 8。
+
+启动参数：
+  --monster 怪物分类（monster/ 下的子文件夹，如 zhu，all=全部）
+  --player  玩家职业（player/ 下的子文件夹，如 binglei，all=全部）
+  两者都在启动时一次性确定并加载模板，F9 启停机器人时不再询问。
 """
 
 import ctypes
@@ -34,18 +39,21 @@ from core.monster_detector import MonsterDetector
 from core.monster_tracker import MonsterTracker
 from core.pet_feeder import PetFeeder
 from core.screencap import ScreenCapture
-from core.template_matcher import select_monster_category
+from core.template_matcher import select_monster_category, select_player_category
 
 
 class GameBot:
     """智能游戏机器人：组装检测、跟踪、监控各模块并驱动决策循环。"""
 
-    def __init__(self, monster_dir=None):
+    def __init__(self, monster_dir=None, player_dir=None):
         """
         Args:
             monster_dir: 已确定的怪物分类目录（monster/ 下的子目录名，
                          如 "zhu"）。由程序启动时一次性选择/解析并加载模板，
                          F9 启动机器人时不再交互选择。
+            player_dir: 已确定的玩家职业目录（player/ 下的子目录名，
+                        如 "binglei"）。同样在程序启动时一次性选择/解析并
+                        加载模板，F9 启动机器人时不再交互选择。
         """
         self.log = utils.setup_logging()
         self.active_event = threading.Event()  # 是否正在运行
@@ -71,10 +79,13 @@ class GameBot:
         self.aux_skill_enabled = False
         self.aux_skill = AuxSkillCaster(self.keys, log=self.log)
 
-        # 怪物检测器（怪物分类已在程序启动时确定，此处加载模板）
-        self.detector = MonsterDetector(monster_dir=config.MONSTER_DIR, load_monsters=False, screencap=self._cap)
+        # 怪物检测器（怪物分类/玩家职业已在程序启动时确定，此处加载模板）
+        self.detector = MonsterDetector(monster_dir=config.MONSTER_DIR, player_dir=player_dir,
+                                        load_monsters=False, screencap=self._cap)
         loaded = self.detector.set_monster_dir(monster_dir) if monster_dir else 0
         self.log.info("怪物检测分类: %s（%d 个模板）", monster_dir if monster_dir else "(未指定)", loaded)
+        self.log.info("玩家职业: %s（%d 个模板）",
+                      self.detector.player_dir, len(self.detector.player_templates))
 
         # 怪物跟踪器（靠近/随机移动/卡住反向脱困）
         self.tracker = MonsterTracker(self.keys, log=self.log)
@@ -282,15 +293,22 @@ def main():
     parser = argparse.ArgumentParser(description="智能游戏机器人")
     parser.add_argument("--monster", default=None, help="怪物分类名（monster/ 下的子文件夹名），如 zhu；"
                         "传 all 表示全部；不传则在程序启动时交互选择")
+    parser.add_argument("--player", default=None, help="玩家职业名（player/ 下的子文件夹名），如 binglei；"
+                        "传 all 表示全部；不传则在程序启动时交互选择")
     args = parser.parse_args()
 
-    # 程序启动时一次性确定怪物分类（命令行指定或交互选择），之后不再询问
+    # 程序启动时一次性确定怪物分类与玩家职业（命令行指定或交互选择），之后不再询问
     monster_dir = select_monster_category(args.monster)
     if monster_dir is None:
         print("[INFO] 未选择怪物分类，程序退出")
         return
 
-    bot = GameBot(monster_dir=monster_dir)
+    player_dir = select_player_category(args.player)
+    if player_dir is None:
+        print("[INFO] 未选择玩家职业，程序退出")
+        return
+
+    bot = GameBot(monster_dir=monster_dir, player_dir=player_dir)
 
     def on_press(key):
         if key == config.KEY_TOGGLE_BOT:
@@ -326,6 +344,8 @@ def main():
     print("  - 移动: 方向键")
     print(f"  - 怪物检测: core/monster_detector.py")
     print(f"  - 怪物分类: {monster_dir}（启动时已确定，F9 不再询问）")
+    print(f"  - 玩家职业: {player_dir}（启动时已确定，F9 不再询问）"
+          f" | 玩家模板数: {len(bot.detector.player_templates)}")
     print(f"  - 匹配阈值: {config.MATCH_THRESHOLD}")
     print(f"  - 五区巡逻: 开启（检测区域均分 5 块，最左/最右 1/5 为禁止区域，"
           f"触达立即反向；中间 "

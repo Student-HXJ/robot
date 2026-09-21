@@ -4,7 +4,10 @@
 - TemplateLoader：加载目录下所有图片模板（多尺度 + 镜像 + 预计算灰度）
 - match_templates：通用模板匹配（含超大模板回退到整张图的兜底分支）
 - non_max_suppression：非极大抑制，合并距离过近的命中
-- 怪物分类选择：list_monster_categories / select_monster_category
+- 分类选择（monster/ 怪物分类、player/ 玩家职业，加载模式一致）：
+  list_categories / select_category 为通用实现，
+  list_monster_categories / select_monster_category 与
+  list_player_categories / select_player_category 是各自的便捷包装。
 
 模板目录基于 config.resource_dir() 解析（项目根目录下的 monster/、player/），
 文件可安全放在子包 core/ 中。
@@ -143,7 +146,11 @@ def non_max_suppression(hits, distance):
 
 
 # ---------------------------------------------------------------------- #
-#  怪物分类（monster 子文件夹）选择
+#  模板分类（monster/、player/ 下的子文件夹）选择
+#
+#  monster/ 下按怪物种类分子文件夹、player/ 下按职业分子文件夹，二者加载模式
+#  完全一致：命令行指定分类名（或 all）→ 跳过交互；否则启动时列出子文件夹菜单
+#  供选择；没有子文件夹则回退到整个目录。
 # ---------------------------------------------------------------------- #
 
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".bmp")
@@ -157,13 +164,17 @@ def _count_images(dir_path):
     return total
 
 
-def list_monster_categories():
-    """列出 monster/ 目录下的怪物分类子文件夹。
+def list_categories(root_dir):
+    """列出模板根目录下的分类子文件夹。
+
+    Args:
+        root_dir: 模板根目录名（相对项目根目录），如 config.MONSTER_DIR /
+                  config.PLAYER_DIR
 
     Returns:
         [(category_name, image_count), ...]，按名称排序；无子文件夹时返回 []
     """
-    root = config.resource_dir(config.MONSTER_DIR)
+    root = config.resource_dir(root_dir)
     if not os.path.isdir(root):
         return []
     categories = []
@@ -174,40 +185,44 @@ def list_monster_categories():
     return categories
 
 
-def select_monster_category(preset=None):
-    """交互式选择要检测的怪物分类，返回模板目录名（相对项目根目录）。
+def select_category(root_dir, preset=None, menu_title="分类", noun="分类"):
+    """交互式选择模板分类，返回模板目录名（相对项目根目录）。
 
     Args:
+        root_dir: 模板根目录名（相对项目根目录），如 config.MONSTER_DIR /
+                  config.PLAYER_DIR
         preset: 预先指定的分类名（命令行参数），命中则跳过交互
+        menu_title: 交互菜单标题里描述用途的文字（如 "要检测的怪物分类"）
+        noun: 日志/提示中使用的名词（如 "怪物分类" / "玩家职业"）
 
     Returns:
-        目录名，例如 "monster/zhu"；若无子文件夹或选择"全部"则返回 "monster"；
-        用户输入 q 取消时返回 None
+        目录名，例如 "monster/zhu"、"player/binglei"；若无子文件夹或选择
+        "全部"则返回 root_dir；用户输入 q 取消时返回 None
     """
-    categories = list_monster_categories()
+    categories = list_categories(root_dir)
     if not categories:
-        print(f"[INFO] {config.MONSTER_DIR}/ 下未发现分类子文件夹，"
+        print(f"[INFO] {root_dir}/ 下未发现分类子文件夹，"
               "使用整个目录的模板")
-        return config.MONSTER_DIR
+        return root_dir
 
     names = [c[0] for c in categories]
 
     # 命令行预设优先
     if preset:
         if preset in names:
-            print(f"[INFO] 使用指定怪物分类: {preset}")
-            return f"{config.MONSTER_DIR}/{preset}"
+            print(f"[INFO] 使用指定{noun}: {preset}")
+            return f"{root_dir}/{preset}"
         if preset.lower() in ("all", "全部"):
-            print("[INFO] 使用全部怪物分类")
-            return config.MONSTER_DIR
-        print(f"[WARN] 指定的分类不存在: {preset}，改为手动选择")
+            print(f"[INFO] 使用全部{noun}")
+            return root_dir
+        print(f"[WARN] 指定的{noun}不存在: {preset}，改为手动选择")
 
     print("=" * 60)
-    print("  请选择本次要检测的怪物分类")
+    print(f"  请选择本次{menu_title}")
     print("=" * 60)
     for i, (name, count) in enumerate(categories, start=1):
         print(f"  [{i}] {name}  ({count} 张模板)")
-    print(f"  [0] 全部（加载 {config.MONSTER_DIR}/ 下所有分类）")
+    print(f"  [0] 全部（加载 {root_dir}/ 下所有分类）")
     print("  [q] 取消启动")
     print("=" * 60)
 
@@ -224,17 +239,63 @@ def select_monster_category(preset=None):
             return None
         # 支持直接输入分类名
         if raw in names:
-            print(f"[INFO] 已选择怪物分类: {raw}")
-            return f"{config.MONSTER_DIR}/{raw}"
+            print(f"[INFO] 已选择{noun}: {raw}")
+            return f"{root_dir}/{raw}"
         if not raw.isdigit():
             print("[WARN] 输入无效，请输入列表中的序号或分类名")
             continue
         idx = int(raw)
         if idx == 0:
             print("[INFO] 已选择: 全部分类")
-            return config.MONSTER_DIR
+            return root_dir
         if 1 <= idx <= len(categories):
             chosen = categories[idx - 1][0]
-            print(f"[INFO] 已选择怪物分类: {chosen}")
-            return f"{config.MONSTER_DIR}/{chosen}"
+            print(f"[INFO] 已选择{noun}: {chosen}")
+            return f"{root_dir}/{chosen}"
         print("[WARN] 序号超出范围，请重新输入")
+
+
+def list_monster_categories():
+    """列出 monster/ 目录下的怪物分类子文件夹。
+
+    Returns:
+        [(category_name, image_count), ...]，按名称排序；无子文件夹时返回 []
+    """
+    return list_categories(config.MONSTER_DIR)
+
+
+def select_monster_category(preset=None):
+    """交互式选择要检测的怪物分类，返回模板目录名（相对项目根目录）。
+
+    Args:
+        preset: 预先指定的分类名（命令行参数），命中则跳过交互
+
+    Returns:
+        目录名，例如 "monster/zhu"；若无子文件夹或选择"全部"则返回 "monster"；
+        用户输入 q 取消时返回 None
+    """
+    return select_category(config.MONSTER_DIR, preset,
+                           menu_title="要检测的怪物分类", noun="怪物分类")
+
+
+def list_player_categories():
+    """列出 player/ 目录下的玩家职业分类子文件夹。
+
+    Returns:
+        [(category_name, image_count), ...]，按名称排序；无子文件夹时返回 []
+    """
+    return list_categories(config.PLAYER_DIR)
+
+
+def select_player_category(preset=None):
+    """交互式选择要使用的玩家职业，返回模板目录名（相对项目根目录）。
+
+    Args:
+        preset: 预先指定的职业名（命令行参数 --player），命中则跳过交互
+
+    Returns:
+        目录名，例如 "player/binglei"；若无子文件夹或选择"全部"则返回
+        "player"（递归加载所有职业）；用户输入 q 取消时返回 None
+    """
+    return select_category(config.PLAYER_DIR, preset,
+                           menu_title="要使用的玩家职业", noun="玩家职业")

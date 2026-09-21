@@ -22,16 +22,16 @@ venv/
 │   ├── region_calib.py       # 区域框选校准公共逻辑（两个 calibrate_* 共用）
 │   ├── screencap.py          # ScreenCapture 屏幕截图
 │   ├── key_control.py        # KeyControl 按键模拟
-│   ├── template_matcher.py   # TemplateLoader 模板加载与匹配
-│   ├── player_detector.py    # PlayerDetector 玩家检测
+│   ├── template_matcher.py   # TemplateLoader 模板加载与匹配（怪物分类/玩家职业选择）
+│   ├── player_detector.py    # PlayerDetector 玩家检测（按职业加载）
 │   ├── attack_distance.py    # 攻击距离计算（纯函数）
 │   ├── monster_detector.py   # MonsterDetector 怪物检测
 │   ├── monster_tracker.py    # MonsterTracker 怪物跟踪（靠近/卡住脱困）
 │   ├── hpmp_monitor.py       # HPMPMonitor 加血加蓝
 │   ├── pet_feeder.py         # PetFeeder 喂宠物
 │   └── aux_skill.py          # AuxSkillCaster 辅助技能（移动加速/攻击加速）
-├── monster/                  # 怪物模板（按分类分子文件夹）
-└── player/                   # 玩家模板
+├── monster/                  # 怪物模板（按怪物种类分子文件夹，如 monster/zhu）
+└── player/                   # 玩家模板（按职业分子文件夹，如 player/binglei）
 ```
 
 ## 安装
@@ -43,12 +43,12 @@ pip install opencv-python mss numpy pydirectinput pynput matplotlib
 ## 运行
 
 ```bash
-# 启动主机器人（可选 --monster 固定分类，跳过交互菜单）
-python game_bot.py --monster zhu
-python game_bot.py --monster all
+# 启动主机器人（--monster 固定怪物分类，--player 固定玩家职业，都可跳过交互菜单）
+python game_bot.py --monster zhu --player binglei
+python game_bot.py --monster all --player all
 
 # 单独运行检测（观察识别效果，F9 启停，F8 退出）
-python monster_detect.py --monster zhu
+python -m core.monster_detector --monster zhu --player binglei
 
 # 校准检测框（写入 config.toml 的 [detect] detect_region）
 python calibrate_detect.py
@@ -57,8 +57,9 @@ python calibrate_detect.py
 python calibrate_hpmp.py
 ```
 
-不传 `--monster` 时，程序启动会列出 `monster/` 下的分类让你选择；
-传 `--monster all` 表示加载全部分类。
+不传 `--monster` / `--player` 时，程序启动会分别列出 `monster/` 下的怪物分类
+和 `player/` 下的玩家职业让你选择；传 `all` 表示加载该目录下全部分类
+（`player/` 下职业模板差异较大，一般只选当前角色的职业）。
 
 ## 操作说明
 
@@ -109,8 +110,10 @@ python calibrate_hpmp.py
 
 ## 故障排查
 
-- **模板加载为 0 / 检测不到怪物**：确认 `monster/<分类>/` 下有 PNG，且
-  输出图片（`detect_live.png`）落在项目根目录。
+- **模板加载为 0 / 检测不到怪物或玩家**：确认 `monster/<分类>/` 与
+  `player/<职业>/` 下有 PNG，且 `--monster` / `--player` 选对了分类
+  （启动时会打印实际加载的模板目录与模板数量）；另外确认输出图片
+  （`detect_live.png`）落在项目根目录。
 - **血条识别不准**：在 `config.toml` 的 `[hpmp]` 节把 `save_hp_mp_debug = true`，
   查看生成的 `debug_hp*.png` / `debug_mp*.png` 排查颜色阈值。
 - **按键无效**：确认已以管理员身份运行（程序启动时会自动提权）。

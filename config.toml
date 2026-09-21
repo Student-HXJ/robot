@@ -17,7 +17,9 @@
 # 怪物模板目录：monster/ 下按怪物种类分子文件夹存放模板（如 monster/zhu）。
 # 相对路径基于项目根目录（config.py 所在目录）解析。
 monster_dir = "monster"
-# 玩家模板目录
+# 玩家模板目录：player/ 下按职业分子文件夹存放模板（如 player/binglei），
+# 由启动参数 --player 选择要加载的职业（与 monster/ 的分类加载模式一致）。
+# 相对路径基于项目根目录（config.py 所在目录）解析。
 player_dir = "player"
 
 # ------------------------------------------------------------------ #
@@ -30,7 +32,7 @@ player_dir = "player"
 # 它同时是怪物监控紫框范围（固定覆盖整个检测区域，不随玩家移动）。
 # 格式 [left, top, width, height]，取屏幕中心玩家附近的区域。
 # 注：按「游戏窗口全屏 (0,0) 尺寸 2560x1600」玩家居中实测调整（估算，可再微调）。
-detect_region = [7, 778, 2553, 179]
+detect_region = [0, 781, 2560, 182]
 
 # 检测间隔（秒），0.01 ≈ 100fps
 detect_interval = 0.01
@@ -99,11 +101,11 @@ monster_confirm_score = 0.5
 # 检测区域，不再据此动态移动）。野猪（yezhu）身体高约 82px 且中心比玩家低
 # 约 20px。
 # 注意：该值不影响攻击距离判定（那是 attack_distance_threshold）。
-attack_radius = 500
+attack_radius = 150
 
 # 攻击触发距离（像素）：玩家中心与怪物中心 X 距离 ≤ 此值即发动攻击。
 # 原默认 100px；调大至 120px 以在怪物贴近玩家时更早、更稳定地触发攻击。
-attack_distance_threshold =500
+attack_distance_threshold = 150
 
 # 朝怪物移动时的朝向判定死区（右偏容差，像素）：怪物中心在玩家 X 右侧该值
 # 以内时不切换朝向，避免玩家与怪物大致对齐时左右抖动。
@@ -192,10 +194,10 @@ log_frame_interval = 120
 [aux_skill]
 
 # 移动加速技能施放间隔（秒）：默认 200 秒按一次 key_skill_move
-skill_move_interval = 200.0
+skill_move_interval = 190.0
 
 # 攻击加速技能施放间隔（秒）：默认 30 秒按一次 key_skill_attack_speed
-skill_attack_speed_interval = 30.0
+skill_attack_speed_interval = 60.0
 
 # 说明：F11 开启后先等满各自间隔再首次施放，之后每隔该间隔按一次；
 # 两个技能独立计时。间隔填 0 或负数表示禁用该技能。
