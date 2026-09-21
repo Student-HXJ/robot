@@ -8,8 +8,7 @@
 import cv2
 
 import config
-from core.template_matcher import (TemplateLoader, match_templates,
-                                   non_max_suppression)
+from core.template_matcher import (TemplateLoader, match_templates, non_max_suppression)
 
 
 class PlayerDetector:
@@ -21,9 +20,7 @@ class PlayerDetector:
 
     def __init__(self, max_width, max_height):
         # 加载玩家模板（含镜像，玩家也可能朝右）
-        self.templates = TemplateLoader(config.PLAYER_DIR,
-                                        with_mirror=True).load(
-                                            max_width, max_height)
+        self.templates = TemplateLoader(config.PLAYER_DIR, with_mirror=True).load(max_width, max_height)
         if not self.templates:
             print("[WARN] 未加载到任何玩家模板！请检查 player/ 目录")
 
@@ -41,8 +38,7 @@ class PlayerDetector:
         x_start = config.PLAYER_DETECT_X_SHRINK
         x_end = w - config.PLAYER_DETECT_X_SHRINK
         search_region = screen_gray[:, x_start:x_end]
-        hits = match_templates(search_region, self.templates,
-                               config.PLAYER_MATCH_THRESHOLD)
+        hits = match_templates(search_region, self.templates, config.PLAYER_MATCH_THRESHOLD)
         hits = non_max_suppression(hits, config.NMS_DISTANCE)
         if not hits:
             return None

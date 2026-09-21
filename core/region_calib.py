@@ -51,17 +51,17 @@ OUTPUT_NAMES = {
 # 校准 key → 全屏总览上画框的颜色（BGR）
 OVERVIEW_COLORS = {
     "detect": (0, 255, 255),  # 黄
-    "hp": (0, 0, 255),        # 红
-    "mp": (255, 0, 0),        # 蓝
+    "hp": (0, 0, 255),  # 红
+    "mp": (255, 0, 0),  # 蓝
 }
 
 # 最小框选尺寸（像素），小于此值视为误触
 MIN_REGION_SIZE = 5
 
-
 # ---------------------------------------------------------------------- #
 #  抓图
 # ---------------------------------------------------------------------- #
+
 
 def switch_to_game():
     """抓全屏前把游戏窗口切到前台（全屏时避免抓到桌面/被遮挡窗口）。
@@ -141,19 +141,14 @@ def _bring_window_to_front(fig, title="框选窗口"):
 
         # 必须声明 argtypes：否则 64 位 HWND 会被 ctypes 截断成 32 位，
         # SetWindowPos 直接返回 0（置顶失败）。
-        user32.SetWindowPos.argtypes = [ctypes.wintypes.HWND,
-                                        ctypes.wintypes.HWND,
-                                        ctypes.c_int, ctypes.c_int,
-                                        ctypes.c_int, ctypes.c_int,
-                                        ctypes.c_uint]
+        user32.SetWindowPos.argtypes = [ctypes.wintypes.HWND, ctypes.wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
         user32.SetWindowPos.restype = ctypes.wintypes.BOOL
         user32.SetForegroundWindow.argtypes = [ctypes.wintypes.HWND]
         user32.SetForegroundWindow.restype = ctypes.wintypes.BOOL
 
         HWND_TOPMOST = -1
         SWP_NOSIZE, SWP_NOMOVE, SWP_SHOWWINDOW = 0x0001, 0x0002, 0x0040
-        ok = user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
-                                 SWP_NOSIZE | SWP_NOMOVE | SWP_SHOWWINDOW)
+        ok = user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_SHOWWINDOW)
         shown = bool(user32.SetForegroundWindow(hwnd))
         if ok:
             print("[INFO] 已把框选窗口置顶：请在窗口内按住鼠标左键拖拽框选，"
@@ -216,8 +211,7 @@ def _find_tk_window_hwnd(user32):
     """
     found = []
 
-    @ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.HWND,
-                        ctypes.wintypes.LPARAM)
+    @ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
     def _cb(hwnd, lparam):
         if not user32.IsWindowVisible(hwnd):
             return True
@@ -237,6 +231,7 @@ def _find_tk_window_hwnd(user32):
 # ---------------------------------------------------------------------- #
 #  框选
 # ---------------------------------------------------------------------- #
+
 
 def try_gui_select(full_img, keys):
     """尝试用 matplotlib 交互框选；成功返回 {key: region}，失败返回 None。
@@ -281,14 +276,7 @@ def try_gui_select(full_img, keys):
             rect["region"] = (left, top, w, h)
             print(f"  {label} 区域: left={left} top={top} w={w} h={h}")
 
-        rs = RectangleSelector(ax,
-                               on_select,
-                               useblit=True,
-                               button=[1],
-                               minspanx=MIN_REGION_SIZE,
-                               minspany=MIN_REGION_SIZE,
-                               spancoords="pixels",
-                               interactive=True)
+        rs = RectangleSelector(ax, on_select, useblit=True, button=[1], minspanx=MIN_REGION_SIZE, minspany=MIN_REGION_SIZE, spancoords="pixels", interactive=True)
 
         def on_key(event):
             if event.key == "enter":
@@ -342,6 +330,7 @@ def manual_select(full_img, keys):
 #  存图校验
 # ---------------------------------------------------------------------- #
 
+
 def verify_regions(full_img, regions, overview_name):
     """按框选结果存图，供人工核对识别是否准确。
 
@@ -376,8 +365,7 @@ def verify_regions(full_img, regions, overview_name):
                       "请重新框选")
         # 全屏总览上画框
         cv2.rectangle(overview, (left, top), (left + w, top + h), color, 2)
-        cv2.putText(overview, key.upper(), (left + 3, max(10, top - 5)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+        cv2.putText(overview, key.upper(), (left + 3, max(10, top - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
     cv2.imwrite(project_path(overview_name), overview)
     print(f"[INFO] 已保存 {overview_name}（全屏总览，核对框是否对准）")
@@ -386,6 +374,7 @@ def verify_regions(full_img, regions, overview_name):
 # ---------------------------------------------------------------------- #
 #  写回 config.toml
 # ---------------------------------------------------------------------- #
+
 
 def write_to_config(regions):
     """把框选结果写回 config.toml 的 [detect]/[hpmp] 节。
@@ -438,6 +427,7 @@ def write_to_config(regions):
 # ---------------------------------------------------------------------- #
 #  流程编排
 # ---------------------------------------------------------------------- #
+
 
 def select_regions(full_img, keys):
     """框选入口：优先 GUI，无 GUI 或框选为空时回退到手动输入坐标。

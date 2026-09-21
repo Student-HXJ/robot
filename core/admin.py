@@ -22,6 +22,5 @@ def ensure_admin():
     script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
     # 以 python.exe 重新启动自身：脚本路径必须作为第一个参数传给解释器。
     params = " ".join(f'"{a}"' for a in sys.argv)
-    ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params,
-                                        script_dir, 1)
+    ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, script_dir, 1)
     sys.exit(0)

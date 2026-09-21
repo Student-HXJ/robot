@@ -46,8 +46,7 @@ class TemplateLoader:
             return []
         templates = []
         for ext in ("*.png", "*.jpg", "*.jpeg", "*.bmp"):
-            pattern = (os.path.join(tpl_dir, "**", ext)
-                       if self.recursive else os.path.join(tpl_dir, ext))
+            pattern = (os.path.join(tpl_dir, "**", ext) if self.recursive else os.path.join(tpl_dir, ext))
             for path in glob(pattern, recursive=self.recursive):
                 img = cv2.imread(path, cv2.IMREAD_COLOR)
                 if img is None:
@@ -62,28 +61,19 @@ class TemplateLoader:
                     if new_w > max_width or new_h > max_height:
                         continue
                     resized = cv2.resize(img_gray, (new_w, new_h))
-                    templates.append((np.ascontiguousarray(resized), scale,
-                                      os.path.basename(path), "原"))
+                    templates.append((np.ascontiguousarray(resized), scale, os.path.basename(path), "原"))
                     if self.with_mirror:
                         img_flip = np.ascontiguousarray(cv2.flip(img, 1))
-                        img_flip_gray = cv2.cvtColor(img_flip,
-                                                     cv2.COLOR_BGR2GRAY)
-                        resized_flip = cv2.resize(img_flip_gray,
-                                                  (new_w, new_h))
-                        templates.append(
-                            (np.ascontiguousarray(resized_flip), scale,
-                             os.path.basename(path), "镜像"))
+                        img_flip_gray = cv2.cvtColor(img_flip, cv2.COLOR_BGR2GRAY)
+                        resized_flip = cv2.resize(img_flip_gray, (new_w, new_h))
+                        templates.append((np.ascontiguousarray(resized_flip), scale, os.path.basename(path), "镜像"))
                 print(f"[INFO] 加载模板: {os.path.basename(path)} "
                       f"({img.shape[1]}x{img.shape[0]}), "
                       f"镜像={'是' if self.with_mirror else '否'}")
         return templates
 
 
-def match_templates(screen_gray,
-                    templates,
-                    threshold,
-                    fallback=None,
-                    y_offset=0):
+def match_templates(screen_gray, templates, threshold, fallback=None, y_offset=0):
     """通用模板匹配。
 
     Args:
@@ -102,8 +92,7 @@ def match_templates(screen_gray,
     for tmpl_gray, scale, name, direction in templates:
         th, tw = tmpl_gray.shape[:2]
         if th <= screen_gray.shape[0] and tw <= screen_gray.shape[1]:
-            result = cv2.matchTemplate(screen_gray, tmpl_gray,
-                                       cv2.TM_CCOEFF_NORMED)
+            result = cv2.matchTemplate(screen_gray, tmpl_gray, cv2.TM_CCOEFF_NORMED)
             ys, xs = np.where(result >= threshold)
             for x, y in zip(xs, ys):
                 score = result[y, x]
@@ -115,11 +104,9 @@ def match_templates(screen_gray,
                     score,
                     name,
                     direction))
-        elif (fallback is not None and th <= fallback.shape[0]
-              and tw <= fallback.shape[1]):
+        elif (fallback is not None and th <= fallback.shape[0] and tw <= fallback.shape[1]):
             # 模板超高 ROI（一般不会发生，这里仅作安全兜底）
-            result = cv2.matchTemplate(fallback, tmpl_gray,
-                                       cv2.TM_CCOEFF_NORMED)
+            result = cv2.matchTemplate(fallback, tmpl_gray, cv2.TM_CCOEFF_NORMED)
             ys, xs = np.where(result >= threshold)
             for x, y in zip(xs, ys):
                 score = result[y, x]
@@ -150,8 +137,7 @@ def non_max_suppression(hits, distance):
     kept = []
     for h in hits:
         cx, cy = h[0], h[1]
-        if not any(((cx - k[0])**2 + (cy - k[1])**2)**0.5 < distance
-                   for k in kept):
+        if not any(((cx - k[0])**2 + (cy - k[1])**2)**0.5 < distance for k in kept):
             kept.append(h)
     return kept
 

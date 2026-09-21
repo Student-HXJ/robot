@@ -61,14 +61,7 @@ class KeyControl:
     #  带朝向的攻击
     # ------------------------------------------------------------------ #
 
-    def attack_toward(self,
-                      cx,
-                      px,
-                      name=None,
-                      direction=None,
-                      dist=None,
-                      score=None,
-                      frame_count=0):
+    def attack_toward(self, cx, px, name=None, direction=None, dist=None, score=None, frame_count=0):
         """朝怪物方向攻击：先确保面朝怪物再攻击，绝不朝反方向攻击。
 
         攻击朝向判定：怪物中心 cx 明显在玩家中心 px 左侧（|cx-px| 超过
@@ -110,8 +103,7 @@ class KeyControl:
             except Exception:
                 pass
         if frame_count % config.LOG_FRAME_INTERVAL == 0:
-            face = ("左" if face_key == config.KEY_LEFT
-                    else "右" if face_key == config.KEY_RIGHT else "当前")
+            face = ("左" if face_key == config.KEY_LEFT else "右" if face_key == config.KEY_RIGHT else "当前")
             self.log.info(f"朝{face}攻击 {name}({direction}) "
                           f"距离{dist:.0f}px 置信度={score:.2f}")
 

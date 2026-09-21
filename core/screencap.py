@@ -44,8 +44,7 @@ class ScreenCapture:
             if not self._hwnd_searched:
                 with self._hwnd_lock:
                     if not self._hwnd_searched:
-                        self._game_hwnd = find_game_window_hwnd(
-                            config.GAME_WINDOW_KEYWORD)
+                        self._game_hwnd = find_game_window_hwnd(config.GAME_WINDOW_KEYWORD)
                         self._hwnd_searched = True
             if self._game_hwnd:
                 bring_to_front(self._game_hwnd)
@@ -63,12 +62,7 @@ class ScreenCapture:
         """
         self._activate_game_window()
         left, top, w, h = region
-        shot = self._sct.grab({
-            "left": left,
-            "top": top,
-            "width": w,
-            "height": h
-        })
+        shot = self._sct.grab({"left": left, "top": top, "width": w, "height": h})
         return np.ascontiguousarray(np.array(shot)[:, :, :3])
 
     def primary_size(self):

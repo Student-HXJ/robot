@@ -62,8 +62,7 @@ class AuxSkillCaster:
         """当前启用的技能列表：[(名称, 按键, 间隔秒), ...]（间隔 <=0 表示禁用）。"""
         return [
             ("移动加速", config.KEY_SKILL_MOVE, config.SKILL_MOVE_INTERVAL),
-            ("攻击加速", config.KEY_SKILL_ATTACK_SPEED,
-             config.SKILL_ATTACK_SPEED_INTERVAL),
+            ("攻击加速", config.KEY_SKILL_ATTACK_SPEED, config.SKILL_ATTACK_SPEED_INTERVAL),
         ]
 
     def _loop(self):

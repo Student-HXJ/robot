@@ -67,9 +67,7 @@ class MonsterTracker:
             frame_count: 当前帧计数（降频日志）
             name, dist: 用于日志的怪物信息
         """
-        move_dir = (config.KEY_RIGHT
-                    if cx > px + config.ATTACK_CENTER_OFFSET else
-                    config.KEY_LEFT)
+        move_dir = (config.KEY_RIGHT if cx > px + config.ATTACK_CENTER_OFFSET else config.KEY_LEFT)
         if frame_count % config.LOG_FRAME_INTERVAL == 0:
             dist_txt = f"{dist:.0f}" if dist is not None else f"{cx - px:.0f}"
             self.log.info(f"移动{move_dir} 靠近 {name or ''} "
@@ -111,20 +109,17 @@ class MonsterTracker:
                 # 方向继续巡逻，不立即切回旧持久方向
                 self._phase_dir = held
                 if frame_count % config.LOG_FRAME_INTERVAL == 0:
-                    self.log.info(
-                        f"追怪退出，保持朝向"
-                        f"{'右' if held == config.KEY_RIGHT else '左'}巡逻")
+                    self.log.info(f"追怪退出，保持朝向"
+                                  f"{'右' if held == config.KEY_RIGHT else '左'}巡逻")
             else:
                 # 未按住方向键：沿持久方向继续巡逻
                 self._keys.hold_dir(self._phase_dir)
                 self._last_move_pos = cur
                 self._stuck_base_dir = self._phase_dir
-                self._move_stuck_check_at = (now +
-                                             config.MOVE_STUCK_CHECK_INTERVAL)
+                self._move_stuck_check_at = (now + config.MOVE_STUCK_CHECK_INTERVAL)
                 if frame_count % config.LOG_FRAME_INTERVAL == 0:
-                    self.log.info(
-                        f"空闲巡逻（按住"
-                        f"{'右' if self._phase_dir == config.KEY_RIGHT else '左'}）")
+                    self.log.info(f"空闲巡逻（按住"
+                                  f"{'右' if self._phase_dir == config.KEY_RIGHT else '左'}）")
 
     def keep_centered(self, now, px, pw, left_boundary, right_boundary):
         """五区巡逻禁止区域判定：玩家框触达检测框最左/最右禁止区域边界时，立即
@@ -155,7 +150,7 @@ class MonsterTracker:
         if box_left < left_boundary:
             center_dir = config.KEY_RIGHT  # 框左边界触达区块1右边界 → 往右反向
         elif box_right > right_boundary:
-            center_dir = config.KEY_LEFT   # 框右边界触达区块5左边界 → 往左反向
+            center_dir = config.KEY_LEFT  # 框右边界触达区块5左边界 → 往左反向
         else:
             # 玩家框整体在中间块内，清除回中状态（下次触达边界时重新记日志）
             self._centering_dir = None
@@ -164,12 +159,11 @@ class MonsterTracker:
         self._phase_dir = center_dir  # 持久方向同步为反向方向
         # 换向/重新触达边界时各记一次日志，避免每帧刷屏
         if self._centering_dir != center_dir:
-            self.log.info(
-                f"玩家框触达检测框"
-                f"{'左' if center_dir == config.KEY_RIGHT else '右'}禁止区边界"
-                f"（px={px:.0f}，中区 [{left_boundary:.0f}, "
-                f"{right_boundary:.0f}]），按住"
-                f"{'右' if center_dir == config.KEY_RIGHT else '左'}反向")
+            self.log.info(f"玩家框触达检测框"
+                          f"{'左' if center_dir == config.KEY_RIGHT else '右'}禁止区边界"
+                          f"（px={px:.0f}，中区 [{left_boundary:.0f}, "
+                          f"{right_boundary:.0f}]），按住"
+                          f"{'右' if center_dir == config.KEY_RIGHT else '左'}反向")
             self._centering_dir = center_dir
         return True
 
@@ -198,8 +192,7 @@ class MonsterTracker:
         if cur is None or held is None:
             return False
         # 基准点缺失，或按住方向已变（刚换方向）→ 记录基准点并开始新周期
-        if (self._last_move_pos is None
-                or self._stuck_base_dir != held):
+        if (self._last_move_pos is None or self._stuck_base_dir != held):
             self._last_move_pos = cur
             self._stuck_base_dir = held
             self._move_stuck_check_at = now + config.MOVE_STUCK_CHECK_INTERVAL
@@ -209,8 +202,7 @@ class MonsterTracker:
             return False
 
         # 到检查点：比较当前坐标与周期开始时的基准点（整周期位移）
-        moved = (abs(cur[0] - self._last_move_pos[0]) +
-                 abs(cur[1] - self._last_move_pos[1]))
+        moved = (abs(cur[0] - self._last_move_pos[0]) + abs(cur[1] - self._last_move_pos[1]))
         # 刷新下一个周期的基准点（以当前坐标为准）
         self._last_move_pos = cur
         self._move_stuck_check_at = now + config.MOVE_STUCK_CHECK_INTERVAL
@@ -219,8 +211,7 @@ class MonsterTracker:
             return False
 
         # 坐标长时间没变，撞墙/被阻挡 → 立即向相反方向移动
-        opp = (config.KEY_RIGHT if held == config.KEY_LEFT
-               else config.KEY_LEFT)
+        opp = (config.KEY_RIGHT if held == config.KEY_LEFT else config.KEY_LEFT)
         self._keys.hold_dir(opp)
         self._stuck_base_dir = opp
         self._phase_dir = opp  # 持久方向同步为反向方向
